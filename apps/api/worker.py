@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(__file__))
 
 from config import settings
 from database import async_session_factory, init_db
-from models.entities import Job, Content, Asset, Transcript, ContentBrief, GeneratedContent, Carousel
+from models.entities import Job, Content, Asset, Transcript, ContentBrief, GeneratedContent, Carousel, Clip, ClipVariant
 from services.queue_service import queue_service
 from services.media_service import media_processor
 from services.storage_service import storage_service
@@ -26,6 +26,7 @@ async def process_single_job(payload: dict) -> bool:
     content_id = payload.get("content_id")
     asset_id = payload.get("asset_id")
     carousel_id = payload.get("carousel_id")
+    clip_id = payload.get("clip_id")
     job_type = payload.get("job_type", "MEDIA_PROCESSING")
 
     logger.info(f"Processing job {job_id} (Type: {job_type}) for Content: {content_id or carousel_id}")
@@ -155,6 +156,33 @@ async def process_single_job(payload: dict) -> bool:
             # 6. Render carousel PNGs and PDF
             await carousel_renderer.render_carousel_deck(carousel_id)
 
+        elif job_type == "CLIP_DISCOVERY":
+            # 7. Discover candidate clips from transcript & ContentBrief
+            min_dur = payload.get("min_duration", 15.0)
+            max_dur = payload.get("max_duration", 90.0)
+            t_count = payload.get("target_count", 5)
+            f_refresh = payload.get("force_refresh", False)
+
+            await ai_service.discover_and_persist_clips(
+                content_id=content_id,
+                min_duration=min_dur,
+                max_duration=max_dur,
+                target_count=t_count,
+                force_refresh=f_refresh
+            )
+
+        elif job_type == "CLIP_RENDER":
+            # 8. Render master clip and aspect ratio variants
+            clip_id = payload.get("clip_id")
+            aspect_ratios = payload.get("aspect_ratios", ["9:16"])
+            inc_thumb = payload.get("include_thumbnail", True)
+
+            await media_processor.process_clip_media(
+                clip_id=clip_id,
+                aspect_ratios=aspect_ratios,
+                include_thumbnail=inc_thumb
+            )
+
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:
             job_res = await session.execute(select(Job).where(Job.id == job_id))
@@ -189,6 +217,12 @@ async def process_single_job(payload: dict) -> bool:
                 c_item = c_obj.scalar_one_or_none()
                 if c_item:
                     c_item.status = "FAILED"
+
+            if clip_id:
+                cl_obj = await session.execute(select(Clip).where(Clip.id == clip_id))
+                cl_item = cl_obj.scalar_one_or_none()
+                if cl_item:
+                    cl_item.status = "FAILED"
 
             if job:
                 if not is_permanent and job.attempts < job.max_attempts:
