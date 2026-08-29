@@ -24,10 +24,30 @@ import {
   Trash2,
   Sliders,
   Scissors,
-  ExternalLink
+  ExternalLink,
+  Type,
+  Subtitles,
+  Sparkle,
+  UploadCloud,
+  Globe,
+  AlertTriangle,
+  X,
+  Lock,
+  Share2
 } from 'lucide-react';
 import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon, FacebookIcon } from '@/components/ui/SocialIcons';
-import { ContentItem, ContentVariant, Transcript, ContentBrief, GeneratedContent, ClipItem } from '@/types';
+import { 
+  ContentItem, 
+  ContentVariant, 
+  Transcript, 
+  ContentBrief, 
+  GeneratedContent, 
+  ClipItem, 
+  CaptionCue, 
+  ClipCaptionsData,
+  PlatformConnectionItem,
+  PublicationItem
+} from '@/types';
 import { api } from '@/lib/api';
 
 function RepurposeContent() {
@@ -39,6 +59,8 @@ function RepurposeContent() {
   const [brief, setBrief] = useState<ContentBrief | null>(null);
   const [generatedList, setGeneratedList] = useState<GeneratedContent[]>([]);
   const [clipsList, setClipsList] = useState<ClipItem[]>([]);
+  const [connections, setConnections] = useState<PlatformConnectionItem[]>([]);
+  const [publications, setPublications] = useState<PublicationItem[]>([]);
   
   const [mainStudioTab, setMainStudioTab] = useState<'copy' | 'clips'>('copy');
   const [selectedFormat, setSelectedFormat] = useState('9:16');
@@ -47,6 +69,7 @@ function RepurposeContent() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isDiscoveringClips, setIsDiscoveringClips] = useState(false);
   const [generatingClipId, setGeneratingClipId] = useState<string | null>(null);
+  const [isRenderingCaptions, setIsRenderingCaptions] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false);
@@ -56,6 +79,25 @@ function RepurposeContent() {
   const [editedStartTime, setEditedStartTime] = useState<number>(0);
   const [editedEndTime, setEditedEndTime] = useState<number>(30);
   const [selectedClipRatio, setSelectedClipRatio] = useState<string>('9:16');
+  
+  // Phase 6 Captions & Subtitles State
+  const [captionsData, setCaptionsData] = useState<ClipCaptionsData | null>(null);
+  const [selectedCaptionStyle, setSelectedCaptionStyle] = useState<string>('BOLD_PUNCH');
+  const [captionsEnabled, setCaptionsEnabled] = useState<boolean>(true);
+  const [highlightKeywordsInput, setHighlightKeywordsInput] = useState<string>('');
+  const [activeCaptionCue, setActiveCaptionCue] = useState<CaptionCue | null>(null);
+  const [currentPlaybackTime, setCurrentPlaybackTime] = useState<number>(0);
+  
+  // Phase 7 & 8 Multi-Platform Publishing Flow State
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [targetPublishClip, setTargetPublishClip] = useState<ClipItem | null>(null);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['youtube']);
+  const [activeModalPlatform, setActiveModalPlatform] = useState<string>('youtube');
+  const [platformMetaMap, setPlatformMetaMap] = useState<Record<string, { connectionId: string; title: string; description: string; tags: string; privacy: 'PRIVATE' | 'UNLISTED' | 'PUBLIC' }>>({});
+  const [isPublishing, setIsPublishing] = useState<boolean>(false);
+  const [publishFeedback, setPublishFeedback] = useState<string | null>(null);
+  const [retryingPubId, setRetryingPubId] = useState<string | null>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -92,13 +134,43 @@ function RepurposeContent() {
         const cl = await api.getContentClips(id);
         setClipsList(cl.items);
         if (cl.items.length > 0 && !selectedClip) {
-          setSelectedClip(cl.items[0]);
-          setEditedStartTime(cl.items[0].start_time);
-          setEditedEndTime(cl.items[0].end_time);
+          handleSelectClip(cl.items[0]);
         }
       } catch {}
+
+      // Load Connections
+      try {
+        const conns = await api.getPlatformConnections();
+        setConnections(conns.items || []);
+      } catch {}
+
+      // Load Publications
+      try {
+        const pubs = await api.getPublications(id);
+        setPublications(pubs.items || []);
+      } catch {}
+
     } catch (e) {
       console.warn("Failed to load content data:", e);
+    }
+  };
+
+  const loadPublications = async (id: string) => {
+    try {
+      const pubs = await api.getPublications(id);
+      setPublications(pubs.items || []);
+    } catch {}
+  };
+
+  const loadClipCaptions = async (clipId: string) => {
+    try {
+      const cap = await api.getClipCaptions(clipId);
+      setCaptionsData(cap);
+      setSelectedCaptionStyle(cap.caption_style || 'BOLD_PUNCH');
+      setCaptionsEnabled(cap.caption_enabled);
+      setHighlightKeywordsInput((cap.highlight_keywords || []).join(', '));
+    } catch (e) {
+      console.warn("Failed to load clip captions:", e);
     }
   };
 
@@ -138,12 +210,16 @@ function RepurposeContent() {
     setIsDiscoveringClips(true);
     setActionFeedback(null);
     try {
-      await api.discoverClips(contentId, { min_duration: 15, max_duration: 90, target_count: 5, force_refresh: true });
-      setActionFeedback("AI Short-Form Clip Discovery queued! Analyzing timestamped transcript & moments...");
+      await api.discoverClips(contentId, { force_refresh: true });
+      setActionFeedback("AI moment discovery in progress! Extracting viral hooks...");
       setTimeout(async () => {
-        await loadAllData(contentId);
+        const res = await api.getContentClips(contentId);
+        setClipsList(res.items);
+        if (res.items.length > 0) {
+          handleSelectClip(res.items[0]);
+        }
         setIsDiscoveringClips(false);
-      }, 2500);
+      }, 3000);
     } catch (e: any) {
       setActionFeedback(`Clip discovery failed: ${e.message}`);
       setIsDiscoveringClips(false);
@@ -154,15 +230,32 @@ function RepurposeContent() {
     setSelectedClip(clip);
     setEditedStartTime(clip.start_time);
     setEditedEndTime(clip.end_time);
+    loadClipCaptions(clip.id);
 
-    // Seek player to start time
+    // Jump preview video to clip start time
     if (videoRef.current) {
       videoRef.current.currentTime = clip.start_time;
       videoRef.current.play().catch(() => {});
     }
   };
 
-  const handleSaveClipTimestamps = async () => {
+  const handleTimeUpdate = () => {
+    if (!videoRef.current) return;
+    const t = videoRef.current.currentTime;
+    setCurrentPlaybackTime(t);
+
+    if (mainStudioTab === 'clips' && selectedClip && captionsEnabled && captionsData?.cues) {
+      const relTime = t - selectedClip.start_time;
+      const matchedCue = captionsData.cues.find(
+        (c) => relTime >= c.start_time && relTime <= c.end_time
+      );
+      setActiveCaptionCue(matchedCue || null);
+    } else {
+      setActiveCaptionCue(null);
+    }
+  };
+
+  const handleUpdateClipTiming = async () => {
     if (!selectedClip) return;
     try {
       const updated = await api.updateClip(selectedClip.id, {
@@ -171,25 +264,67 @@ function RepurposeContent() {
       });
       setSelectedClip(updated);
       setClipsList(prev => prev.map(c => c.id === updated.id ? updated : c));
-      setActionFeedback(`Saved updated timestamps (${updated.start_time}s - ${updated.end_time}s, ${updated.duration}s).`);
+      setActionFeedback("Clip interval updated.");
+      loadClipCaptions(updated.id);
     } catch (e: any) {
-      setActionFeedback(`Failed to update timestamps: ${e.message}`);
+      setActionFeedback(`Failed to update clip: ${e.message}`);
     }
   };
 
-  const handleGenerateSingleClip = async (clipId: string) => {
+  const handleGenerateSingleClip = async (clipId: string, burnCaptions: boolean = false) => {
     setGeneratingClipId(clipId);
     setActionFeedback(null);
     try {
-      await api.generateClip(clipId, [selectedClipRatio]);
-      setActionFeedback(`FFmpeg clip extraction job queued (${selectedClipRatio})! Transcoding from master video...`);
+      const keywords = highlightKeywordsInput.split(',').map(k => k.trim()).filter(Boolean);
+      await api.generateClip(clipId, { 
+        aspect_ratios: [selectedClipRatio], 
+        include_thumbnail: true,
+        burn_captions: burnCaptions,
+        caption_style: selectedCaptionStyle,
+        highlight_keywords: keywords
+      });
+      setActionFeedback(`Clip transcoding enqueued (${selectedClipRatio}${burnCaptions ? ' with Burned Captions' : ''})!`);
       setTimeout(async () => {
         if (contentId) await loadAllData(contentId);
         setGeneratingClipId(null);
-      }, 3000);
+      }, 3500);
     } catch (e: any) {
       setActionFeedback(`Clip generation failed: ${e.message}`);
       setGeneratingClipId(null);
+    }
+  };
+
+  const handleUpdateCaptionSettings = async () => {
+    if (!selectedClip) return;
+    const keywords = highlightKeywordsInput.split(',').map(k => k.trim()).filter(Boolean);
+    try {
+      const updated = await api.updateClipCaptions(selectedClip.id, {
+        caption_style: selectedCaptionStyle,
+        caption_enabled: captionsEnabled,
+        highlight_keywords: keywords
+      });
+      setCaptionsData(updated);
+      setActionFeedback("Caption styling preferences saved.");
+    } catch (e: any) {
+      setActionFeedback(`Failed to update caption settings: ${e.message}`);
+    }
+  };
+
+  const handleRenderCaptions = async () => {
+    if (!selectedClip) return;
+    setIsRenderingCaptions(true);
+    setActionFeedback(null);
+    const keywords = highlightKeywordsInput.split(',').map(k => k.trim()).filter(Boolean);
+    try {
+      await api.renderClipCaptions(selectedClip.id, [selectedClipRatio], selectedCaptionStyle, keywords);
+      setActionFeedback(`Caption burning job queued (${selectedCaptionStyle})! Rendering styled overlay cards...`);
+      setTimeout(async () => {
+        if (contentId) await loadAllData(contentId);
+        setIsRenderingCaptions(false);
+      }, 3500);
+    } catch (e: any) {
+      setActionFeedback(`Caption render failed: ${e.message}`);
+      setIsRenderingCaptions(false);
     }
   };
 
@@ -218,6 +353,124 @@ function RepurposeContent() {
     }
   };
 
+  const handleOpenPublishModal = (clip?: ClipItem) => {
+    const target = clip || selectedClip;
+    setTargetPublishClip(target || null);
+    
+    const initialPlatforms = ['youtube', 'instagram', 'linkedin', 'x', 'facebook', 'tiktok'];
+    const newMap: Record<string, { connectionId: string; title: string; description: string; tags: string; privacy: 'PRIVATE' | 'UNLISTED' | 'PUBLIC' }> = {};
+
+    initialPlatforms.forEach(p => {
+      const conn = connections.find(c => c.platform.toLowerCase() === p && c.status === 'CONNECTED');
+      const aiGen = generatedList.find(g => g.platform.toLowerCase() === p);
+      let payload: any = {};
+      if (aiGen && aiGen.payload) {
+        payload = typeof aiGen.payload === 'string' ? JSON.parse(aiGen.payload) : aiGen.payload;
+      }
+
+      const defaultTitle = target?.title || content?.title || "Reflow Video";
+      const defaultDesc = payload.caption || payload.hook || target?.hook || brief?.summary || "Created with Reflow.";
+      const defaultTags = (payload.hashtags && payload.hashtags.length > 0) 
+        ? payload.hashtags.join(', ')
+        : (brief?.topics?.join(', ') || 'reflow, ai');
+
+      newMap[p] = {
+        connectionId: conn ? conn.id : '',
+        title: defaultTitle,
+        description: defaultDesc,
+        tags: defaultTags,
+        privacy: 'PRIVATE'
+      };
+    });
+
+    setPlatformMetaMap(newMap);
+    setSelectedPlatforms(['youtube']);
+    setActiveModalPlatform('youtube');
+    setPublishFeedback(null);
+    setIsPublishModalOpen(true);
+  };
+
+  const handleConfirmPublish = async () => {
+    if (!contentId || selectedPlatforms.length === 0) return;
+
+    // Validate that each selected platform has a connected account
+    const destinations = [];
+    for (const p of selectedPlatforms) {
+      const meta = platformMetaMap[p];
+      if (!meta || !meta.connectionId) {
+        setPublishFeedback(`No connected account selected for ${p.toUpperCase()}. Connect in Connections page or deselect.`);
+        return;
+      }
+      if (!meta.title.trim() && p === 'youtube') {
+        setPublishFeedback(`Title is required for YouTube.`);
+        return;
+      }
+      destinations.push({
+        platform_connection_id: meta.connectionId,
+        title: meta.title.trim(),
+        description: meta.description.trim(),
+        privacy: meta.privacy,
+        tags: meta.tags.split(',').map(t => t.trim()).filter(Boolean)
+      });
+    }
+
+    setIsPublishing(true);
+    setPublishFeedback(null);
+
+    // Pick target variant
+    let variantId = undefined;
+    if (targetPublishClip) {
+      const varItem = targetPublishClip.variants?.find(v => v.has_captions && v.variant_type.includes("9_16")) 
+        || targetPublishClip.variants?.find(v => v.variant_type.includes("9_16"))
+        || targetPublishClip.variants?.[0];
+      variantId = varItem?.id;
+    } else if (matchedVariant) {
+      variantId = matchedVariant.id;
+    }
+
+    try {
+      const res = await api.createBatchPublications({
+        content_id: contentId,
+        variant_id: variantId,
+        destinations: destinations
+      });
+
+      setActionFeedback(`Batch publishing queued across ${res.queued_count} platform destination(s)!`);
+      setIsPublishModalOpen(false);
+      await loadPublications(contentId);
+
+      // Start periodic status polling
+      const pollInterval = setInterval(async () => {
+        if (contentId) {
+          const pRes = await api.getPublications(contentId);
+          setPublications(pRes.items || []);
+          const stillActive = pRes.items.some(p => p.status === 'QUEUED' || p.status === 'UPLOADING' || p.status === 'PUBLISHING');
+          if (!stillActive) {
+            clearInterval(pollInterval);
+          }
+        }
+      }, 3000);
+
+    } catch (err: any) {
+      setPublishFeedback(`Batch publishing error: ${err.message}`);
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const handleRetryPublication = async (pubId: string) => {
+    try {
+      setRetryingPubId(pubId);
+      await api.retryPublication(pubId);
+      setActionFeedback("Retrying publication...");
+      if (contentId) await loadPublications(contentId);
+    } catch (err: any) {
+      setActionFeedback(`Retry failed: ${err.message}`);
+    } finally {
+      setRetryingPubId(null);
+    }
+  };
+
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -230,175 +483,311 @@ function RepurposeContent() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Caption Styling Visualizer for Live Preview Overlay
+  const getCaptionOverlayClass = (style: string) => {
+    switch (style) {
+      case 'BOLD_PUNCH':
+        return 'bg-black/85 border border-yellow-400 text-yellow-300 font-black tracking-wide text-sm sm:text-base px-4 py-2 rounded-xl shadow-2xl';
+      case 'CLEAN_SUBTITLE':
+        return 'bg-slate-900/85 border border-indigo-500/50 text-white font-bold text-xs sm:text-sm px-4 py-1.5 rounded-lg shadow-lg';
+      case 'KINETIC_HIGHLIGHT':
+        return 'bg-purple-950/90 border border-cyan-400 text-white font-black text-sm sm:text-base px-4 py-2 rounded-xl shadow-2xl';
+      case 'MINIMAL_WHITE':
+        return 'bg-black/60 border border-white/20 text-gray-100 font-medium text-xs sm:text-sm px-3 py-1 rounded shadow';
+      default:
+        return 'bg-black/80 text-yellow-400 font-bold px-3 py-1.5 rounded-lg';
+    }
+  };
+
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="space-y-6 animate-fadeIn pb-16">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            {content ? content.title : "Repurpose Studio"}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-white tracking-tight">Repurpose Studio</h1>
+            <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-500/20 font-mono">
+              v1.0 Ready
+            </span>
+          </div>
           <p className="text-xs text-gray-400 mt-0.5">
-            {primaryAsset?.original_filename || "Transform video assets into platform-tailored intelligence, native copies, and short-form clips."}
+            {content ? `Reflowing: "${content.title}"` : 'Select an asset from the Content Library to repurpose'}
           </p>
         </div>
 
-        {/* Studio Mode Tabs */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-[#111827] p-1 rounded-xl border border-[#1F2937]">
+        <div className="flex items-center gap-2.5">
+          {/* Main Studio Mode Toggle */}
+          <div className="bg-[#111827] border border-[#1F2937] p-1 rounded-xl flex items-center gap-1">
             <button
               onClick={() => setMainStudioTab('copy')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                mainStudioTab === 'copy'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
-                  : 'text-gray-400 hover:text-white'
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                mainStudioTab === 'copy' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-white'
               }`}
             >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Platform Copy</span>
+              <Type className="w-3.5 h-3.5" />
+              <span>Native Copy</span>
             </button>
             <button
               onClick={() => setMainStudioTab('clips')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                mainStudioTab === 'clips'
-                  ? 'bg-gradient-to-r from-purple-600 to-cyan-500 text-white shadow-md shadow-cyan-500/20'
-                  : 'text-gray-400 hover:text-white'
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                mainStudioTab === 'clips' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-white'
               }`}
             >
               <Film className="w-3.5 h-3.5" />
-              <span>AI Video Clips ({clipsList.length})</span>
+              <span>Clips & Captions</span>
             </button>
           </div>
+
+          {/* Publish Action Button */}
+          <button
+            onClick={() => handleOpenPublishModal()}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/20 transition-all"
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>Publish to Social</span>
+          </button>
 
           {mainStudioTab === 'copy' ? (
             <button
               onClick={handleGenerateAll}
-              disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-50"
+              disabled={isGenerating || !contentId}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20 transition-all disabled:opacity-50"
             >
-              {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              <span>{isGenerating ? "Synthesizing..." : "Synthesize Copy"}</span>
+              <Sparkles className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
+              <span>{isGenerating ? "Synthesizing AI Intelligence..." : "Synthesize AI Intelligence"}</span>
             </button>
           ) : (
             <button
               onClick={handleDiscoverClips}
-              disabled={isDiscoveringClips}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 hover:opacity-90 text-white text-xs font-bold shadow-lg shadow-purple-500/25 transition-all disabled:opacity-50"
+              disabled={isDiscoveringClips || !contentId}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md shadow-purple-500/20 transition-all disabled:opacity-50"
             >
-              {isDiscoveringClips ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Scissors className="w-4 h-4" />}
+              <Scissors className={`w-3.5 h-3.5 ${isDiscoveringClips ? 'animate-spin' : ''}`} />
               <span>{isDiscoveringClips ? "Discovering Moments..." : "Discover AI Clips"}</span>
             </button>
           )}
         </div>
       </div>
 
+      {/* Feedback Banner */}
       {actionFeedback && (
-        <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-3.5 text-xs text-indigo-300 flex items-center justify-between animate-fadeIn">
+        <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl flex items-center justify-between text-xs text-indigo-300 animate-fadeIn">
           <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+            <Info className="w-4 h-4 text-indigo-400" />
             <span>{actionFeedback}</span>
           </div>
-          <button onClick={() => setActionFeedback(null)} className="text-gray-400 hover:text-white font-semibold">✕</button>
+          <button onClick={() => setActionFeedback(null)} className="text-gray-400 hover:text-white">✕</button>
         </div>
       )}
 
-      {/* Main Grid */}
+      {/* Main Studio Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column (5 cols): Media Player & Controls */}
-        <div className="lg:col-span-5 space-y-5">
+        
+        {/* Left Column (5 cols): Media Player, Live Preview, & Timing Controls */}
+        <div className="lg:col-span-5 space-y-4">
           <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-                {mainStudioTab === 'clips' && selectedClip
-                  ? `Clip Region Preview (${formatSeconds(selectedClip.start_time)} - ${formatSeconds(selectedClip.end_time)})`
-                  : matchedVariant ? `Variant (${selectedFormat})` : "Source Video"}
-              </span>
-              <span className="text-[11px] text-gray-400 bg-[#161B26] px-2 py-0.5 rounded border border-[#1F2937] font-mono">
-                {matchedVariant ? `${matchedVariant.width}x${matchedVariant.height}` : primaryAsset ? `${primaryAsset.width || 1920}x${primaryAsset.height || 1080}` : '1080p'}
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">
+                  {mainStudioTab === 'clips' ? 'Clip Timing & Live Captions' : 'Original Media Canvas'}
+                </span>
+              </div>
+              <span className="text-xs text-gray-500 font-mono">
+                {mainStudioTab === 'clips' ? selectedClipRatio : selectedFormat}
               </span>
             </div>
 
-            <div className="relative aspect-video bg-[#0B0D12] rounded-xl overflow-hidden border border-[#1F2937]/80 flex items-center justify-center">
+            {/* Video Container with Synchronized Live Caption Overlay */}
+            <div className="relative aspect-video rounded-xl bg-black overflow-hidden border border-[#1F2937] flex items-center justify-center group shadow-inner">
               {activeMediaUrl ? (
-                <video 
+                <video
                   ref={videoRef}
-                  src={activeMediaUrl} 
-                  controls 
-                  className="w-full h-full object-contain" 
+                  src={activeMediaUrl}
+                  controls
+                  onTimeUpdate={handleTimeUpdate}
+                  className="w-full h-full object-contain"
                 />
               ) : (
-                <div className="text-xs text-gray-500 flex items-center gap-2">
-                  <Play className="w-4 h-4" />
-                  <span>No media stream available</span>
+                <div className="text-center p-6 space-y-2">
+                  <Play className="w-8 h-8 text-gray-600 mx-auto" />
+                  <p className="text-xs text-gray-500">No media available to preview</p>
+                </div>
+              )}
+
+              {/* Synchronized Real-time Subtitle Overlay on Video */}
+              {mainStudioTab === 'clips' && activeCaptionCue && (
+                <div className="absolute inset-x-0 bottom-12 flex justify-center px-4 pointer-events-none z-20 animate-fadeIn">
+                  <div className={getCaptionOverlayClass(selectedCaptionStyle)}>
+                    <span>{activeCaptionCue.text}</span>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* If in Clips tab and a clip is selected, show interactive timeline adjusters */}
+            {/* Mode Specific Controls */}
             {mainStudioTab === 'clips' && selectedClip && (
-              <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Fine-Tune Timestamps</span>
+              <div className="space-y-4 pt-1">
+                {/* 1. Timing Fine-Tuning Slider Controls */}
+                <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-white">
+                    <span className="flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Timeline Fine-Tuning</span>
+                    </span>
+                    <span className="font-mono text-indigo-400">
+                      Duration: {(editedEndTime - editedStartTime).toFixed(1)}s
+                    </span>
                   </div>
-                  <span className="text-[11px] font-mono text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded">
-                    Duration: {(editedEndTime - editedStartTime).toFixed(1)}s
-                  </span>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-mono block mb-1">Start Time (sec)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min="0"
-                      value={editedStartTime}
-                      onChange={(e) => setEditedStartTime(parseFloat(e.target.value) || 0)}
-                      className="w-full bg-[#111827] border border-[#1F2937] rounded-lg px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
-                    />
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="text-[10px] text-gray-400 block mb-1 font-mono">Start (sec)</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={editedStartTime}
+                        onChange={(e) => setEditedStartTime(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-[#111827] border border-[#1F2937] rounded-lg px-2.5 py-1 text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400 block mb-1 font-mono">End (sec)</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={editedEndTime}
+                        onChange={(e) => setEditedEndTime(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-[#111827] border border-[#1F2937] rounded-lg px-2.5 py-1 text-white font-mono"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] text-gray-400 font-mono block mb-1">End Time (sec)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={editedStartTime + 1}
-                      value={editedEndTime}
-                      onChange={(e) => setEditedEndTime(parseFloat(e.target.value) || editedStartTime + 1)}
-                      className="w-full bg-[#111827] border border-[#1F2937] rounded-lg px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    onClick={handleSaveClipTimestamps}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all"
-                  >
-                    Save Timestamps
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={selectedClipRatio}
-                      onChange={(e) => setSelectedClipRatio(e.target.value)}
-                      className="bg-[#111827] border border-[#1F2937] text-gray-300 text-xs rounded-lg px-2 py-1.5 font-mono focus:outline-none"
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      onClick={handleUpdateClipTiming}
+                      className="px-3 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold transition"
                     >
-                      <option value="9:16">9:16 (Shorts/Reels)</option>
-                      <option value="1:1">1:1 (Square)</option>
-                      <option value="4:5">4:5 (Portrait)</option>
-                      <option value="16:9">16:9 (Landscape)</option>
-                    </select>
+                      Save Timing
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedClipRatio}
+                        onChange={(e) => setSelectedClipRatio(e.target.value)}
+                        className="bg-[#111827] border border-[#1F2937] text-gray-300 text-xs rounded-lg px-2 py-1.5 font-mono focus:outline-none"
+                      >
+                        <option value="9:16">9:16 (Vertical Reel)</option>
+                        <option value="1:1">1:1 (Square)</option>
+                        <option value="4:5">4:5 (Portrait)</option>
+                        <option value="16:9">16:9 (Landscape)</option>
+                      </select>
+
+                      <button
+                        onClick={() => handleGenerateSingleClip(selectedClip.id, false)}
+                        disabled={generatingClipId === selectedClip.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all disabled:opacity-50"
+                      >
+                        {generatingClipId === selectedClip.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5" />}
+                        <span>Clean Clip</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Captions & Subtitles Styling Studio */}
+                <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                      <Subtitles className="w-3.5 h-3.5 text-yellow-400" />
+                      <span>Captions & Subtitle Styling</span>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <span className="text-[11px] text-gray-400">Live Overlay</span>
+                      <input
+                        type="checkbox"
+                        checked={captionsEnabled}
+                        onChange={(e) => setCaptionsEnabled(e.target.checked)}
+                        className="rounded border-gray-700 bg-gray-900 text-yellow-400 focus:ring-0"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'BOLD_PUNCH', name: 'Bold Punch', desc: 'Viral Yellow/Dark', color: 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10' },
+                      { id: 'CLEAN_SUBTITLE', name: 'Clean Subtitle', desc: 'Minimal Slate', color: 'text-indigo-300 border-indigo-500/40 bg-indigo-500/10' },
+                      { id: 'KINETIC_HIGHLIGHT', name: 'Kinetic', desc: 'Neon Cyan Highlights', color: 'text-cyan-300 border-cyan-500/40 bg-cyan-500/10' },
+                      { id: 'MINIMAL_WHITE', name: 'Minimal White', desc: 'Translucent Subtitle', color: 'text-gray-300 border-gray-600 bg-gray-800/40' },
+                    ].map((style) => (
+                      <button
+                        key={style.id}
+                        onClick={() => setSelectedCaptionStyle(style.id)}
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          selectedCaptionStyle === style.id
+                            ? `${style.color} ring-1 ring-white/20 shadow-md`
+                            : 'bg-[#111827] border-[#1F2937] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{style.name}</div>
+                        <div className="text-[10px] opacity-75">{style.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-mono block mb-1">
+                      Keyword Highlights (comma separated)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. content, repurposing, growth, AI"
+                        value={highlightKeywordsInput}
+                        onChange={(e) => setHighlightKeywordsInput(e.target.value)}
+                        className="w-full bg-[#111827] border border-[#1F2937] rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400 font-mono"
+                      />
+                      <button
+                        onClick={handleUpdateCaptionSettings}
+                        className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold flex-shrink-0 transition-colors"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Caption Action Buttons */}
+                  <div className="flex items-center justify-between pt-1 border-t border-[#1F2937] text-[11px]">
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={api.getClipSrtUrl(selectedClip.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 rounded bg-[#111827] hover:bg-gray-800 text-gray-300 border border-[#1F2937] font-mono flex items-center gap-1"
+                      >
+                        <Download className="w-3 h-3 text-gray-400" />
+                        <span>.SRT</span>
+                      </a>
+                      <a
+                        href={api.getClipVttUrl(selectedClip.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 rounded bg-[#111827] hover:bg-gray-800 text-gray-300 border border-[#1F2937] font-mono flex items-center gap-1"
+                      >
+                        <Download className="w-3 h-3 text-gray-400" />
+                        <span>.VTT</span>
+                      </a>
+                    </div>
 
                     <button
-                      onClick={() => handleGenerateSingleClip(selectedClip.id)}
-                      disabled={generatingClipId === selectedClip.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all disabled:opacity-50"
+                      onClick={handleRenderCaptions}
+                      disabled={isRenderingCaptions}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-yellow-500 to-amber-600 hover:opacity-90 text-black text-xs font-black shadow-md shadow-yellow-500/20 transition-all disabled:opacity-50"
                     >
-                      {generatingClipId === selectedClip.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5" />}
-                      <span>{generatingClipId === selectedClip.id ? "Rendering..." : "Render Clip"}</span>
+                      {isRenderingCaptions ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkle className="w-3.5 h-3.5" />}
+                      <span>{isRenderingCaptions ? "Burning..." : "Burn Captions MP4"}</span>
                     </button>
                   </div>
                 </div>
@@ -477,10 +866,10 @@ function RepurposeContent() {
           </div>
         </div>
 
-        {/* Right Column (7 cols): Mode Dependent UI */}
+        {/* Right Column (7 cols): Mode Dependent UI & Publishing History */}
         <div className="lg:col-span-7 space-y-5">
           {mainStudioTab === 'clips' ? (
-            /* Phase 5 AI Short-Form Clips Mode */
+            /* Clips & Captions Mode */
             <div className="space-y-4">
               <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
@@ -512,8 +901,8 @@ function RepurposeContent() {
                   <div className="space-y-3">
                     {clipsList.map((clip) => {
                       const isSelected = selectedClip?.id === clip.id;
-                      const hasRendered = clip.status === 'READY';
-                      const primaryVariant = clip.variants?.find(v => v.variant_type.includes("9_16") || v.variant_type === "MASTER") || clip.variants?.[0];
+                      const cleanVariant = clip.variants?.find(v => !v.has_captions && (v.variant_type.includes("9_16") || v.variant_type === "MASTER"));
+                      const captionedVariant = clip.variants?.find(v => v.has_captions && v.variant_type.includes("9_16")) || clip.variants?.find(v => v.has_captions);
 
                       return (
                         <div
@@ -536,50 +925,71 @@ function RepurposeContent() {
                                 }`}>
                                   {clip.status}
                                 </span>
+                                {clip.quality_score && (
+                                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono">
+                                    Score: {clip.quality_score}
+                                  </span>
+                                )}
                               </div>
-                              <p className="text-xs text-purple-300 font-semibold italic">&ldquo;{clip.hook}&rdquo;</p>
+                              <p className="text-xs text-gray-300 italic">&ldquo;{clip.hook}&rdquo;</p>
                             </div>
 
                             <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-[11px] font-mono text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
-                                {clip.score.toFixed(1)} Score
-                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenPublishModal(clip);
+                                }}
+                                className="px-2.5 py-1 rounded bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 text-xs font-bold flex items-center gap-1 transition"
+                              >
+                                <UploadCloud className="w-3 h-3" />
+                                <span>Publish</span>
+                              </button>
+
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDeleteClip(clip.id);
                                 }}
-                                className="text-gray-500 hover:text-rose-400 p-1 transition-colors"
+                                className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </div>
 
-                          {clip.transcript_excerpt && (
-                            <p className="text-[11px] text-gray-400 leading-relaxed bg-[#111827] p-2.5 rounded-lg font-mono">
-                              {clip.transcript_excerpt}
-                            </p>
-                          )}
+                          <div className="flex items-center justify-between text-[11px] font-mono text-gray-400 pt-1 border-t border-[#1F2937]/70">
+                            <span>
+                              [{formatSeconds(clip.start_time)} - {formatSeconds(clip.end_time)}] ({(clip.end_time - clip.start_time).toFixed(1)}s)
+                            </span>
 
-                          <div className="flex items-center justify-between text-[11px] text-gray-500 pt-1">
-                            <div className="flex items-center gap-2 font-mono">
-                              <Clock className="w-3 h-3 text-gray-400" />
-                              <span>{formatSeconds(clip.start_time)} - {formatSeconds(clip.end_time)} ({clip.duration.toFixed(1)}s)</span>
-                            </div>
-
-                            {hasRendered && primaryVariant && (
-                              <div className="flex items-center gap-3">
-                                <a
-                                  href={api.getClipVariantUrl(clip.id, primaryVariant.id)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-bold"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>Download MP4</span>
-                                </a>
+                            {/* Dual Download Buttons */}
+                            {clip.status === 'READY' && (
+                              <div className="flex items-center gap-2">
+                                {captionedVariant && (
+                                  <a
+                                    href={api.getClipVariantUrl(clip.id, captionedVariant.id)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex items-center gap-1 text-xs text-yellow-400 hover:text-yellow-300 font-bold bg-yellow-500/10 px-2.5 py-1 rounded border border-yellow-500/30 transition-colors"
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Captioned MP4</span>
+                                  </a>
+                                )}
+                                {cleanVariant && (
+                                  <a
+                                    href={api.getClipVariantUrl(clip.id, cleanVariant.id)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-bold bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20 transition-colors"
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Clean MP4</span>
+                                  </a>
+                                )}
                               </div>
                             )}
                           </div>
@@ -591,63 +1001,73 @@ function RepurposeContent() {
               </div>
             </div>
           ) : (
-            /* Phase 3 Copy Mode */
+            /* Native Copy Mode */
             <>
-              {/* Content Brief Card */}
               {brief && (
                 <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-white font-bold text-xs uppercase tracking-wider">
-                      <Sparkles className="w-4 h-4 text-purple-400" />
-                      <span>Content Intelligence Brief</span>
+                      <Quote className="w-4 h-4 text-indigo-400" />
+                      <span>Executive Content Brief</span>
                     </div>
-                    <span className="text-[10px] text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded border border-purple-500/30">
-                      {brief.tone} • {brief.audience}
-                    </span>
+                    <span className="text-[10px] text-gray-500 font-mono">Phase 3 AI Analysis</span>
                   </div>
 
-                  <p className="text-xs text-gray-300 leading-relaxed bg-[#161B26] p-3 rounded-xl border border-[#1F2937]">
-                    {brief.summary}
+                  <p className="text-xs text-gray-300 leading-relaxed italic bg-[#161B26] p-3.5 rounded-xl border border-[#1F2937]">
+                    &ldquo;{brief.summary}&rdquo;
                   </p>
 
-                  {brief.key_points?.length > 0 && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Key Takeaways</span>
-                      <div className="grid grid-cols-1 gap-1.5 pt-1">
+                  <div className="grid grid-cols-2 gap-4 pt-1 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5">Key Insights</span>
+                      <ul className="space-y-1">
                         {brief.key_points.map((pt, idx) => (
-                          <div key={idx} className="flex items-start gap-2 text-xs text-gray-300">
-                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
+                          <li key={idx} className="flex items-start gap-1.5 text-gray-300 text-[11px]">
+                            <span className="text-indigo-400">•</span>
                             <span>{pt}</span>
-                          </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5">Themes & Topics</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {brief.topics.map((t, idx) => (
+                          <span key={idx} className="text-[10px] bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded-md border border-indigo-500/20 font-medium">
+                            #{t}
+                          </span>
                         ))}
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
 
-              {/* Platform Outputs */}
+              {/* Native Platform Copy Cards */}
               <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-1 bg-[#161B26] p-1 rounded-xl border border-[#1F2937] overflow-x-auto">
+                <div className="flex items-center justify-between border-b border-[#1F2937] pb-3">
+                  <div className="flex items-center gap-1 bg-[#161B26] p-1 rounded-xl border border-[#1F2937]">
                     {[
-                      { key: 'linkedin', label: 'LinkedIn', icon: LinkedinIcon, color: 'text-blue-400' },
-                      { key: 'instagram', label: 'Instagram', icon: InstagramIcon, color: 'text-pink-400' },
-                      { key: 'x', label: 'X (Twitter)', icon: XIcon, color: 'text-gray-300' },
-                      { key: 'youtube', label: 'YouTube', icon: YoutubeIcon, color: 'text-red-400' },
-                    ].map((plt) => {
-                      const Icon = plt.icon;
-                      const isSelected = activeOutputTab === plt.key;
+                      { id: 'linkedin', label: 'LinkedIn', icon: LinkedinIcon },
+                      { id: 'instagram', label: 'Instagram', icon: InstagramIcon },
+                      { id: 'x', label: 'X (Twitter)', icon: XIcon },
+                      { id: 'youtube', label: 'YouTube', icon: YoutubeIcon }
+                    ].map((tab) => {
+                      const Icon = tab.icon;
+                      const hasData = generatedList.some(g => g.platform.toLowerCase() === tab.id);
                       return (
                         <button
-                          key={plt.key}
-                          onClick={() => setActiveOutputTab(plt.key)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                            isSelected ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                          key={tab.id}
+                          onClick={() => setActiveOutputTab(tab.id)}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                            activeOutputTab === tab.id
+                              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                              : 'text-gray-400 hover:text-white'
                           }`}
                         >
-                          <Icon className={`w-3.5 h-3.5 ${plt.color}`} />
-                          <span>{plt.label}</span>
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{tab.label}</span>
+                          {hasData && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
                         </button>
                       );
                     })}
@@ -656,136 +1076,417 @@ function RepurposeContent() {
                   <button
                     onClick={() => handleRegeneratePlatform(activeOutputTab)}
                     disabled={isRegenerating}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#161B26] border border-[#1F2937] hover:border-gray-600 text-gray-300 hover:text-white text-xs font-medium transition-all"
+                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg bg-[#161B26] border border-[#1F2937] transition-all disabled:opacity-50"
                   >
-                    <RotateCcw className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
+                    <RotateCcw className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin text-indigo-400' : ''}`} />
                     <span>Regenerate</span>
                   </button>
                 </div>
 
-                {/* Platform Specific Output Body */}
-                {activeOutputTab === 'linkedin' && (
-                  <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white uppercase">LinkedIn Post (Hook + Body + CTA)</span>
-                      <button
-                        onClick={() => handleCopy(`${activePayload.hook || ''}\n\n${activePayload.body || ''}\n\n${activePayload.call_to_action || ''}`, 'linkedin')}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-                      >
-                        {copiedKey === 'linkedin' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'linkedin' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                    <p className="text-xs font-bold text-indigo-300">{activePayload.hook || "Generated Hook"}</p>
-                    <p className="text-xs text-gray-300 whitespace-pre-line leading-relaxed">{activePayload.body || "Generated LinkedIn Post body..."}</p>
-                    <p className="text-xs font-semibold text-emerald-400">{activePayload.call_to_action || ""}</p>
-                    {activePayload.hashtags && (
-                      <p className="text-[11px] text-cyan-400 font-mono">{activePayload.hashtags.join(' ')}</p>
-                    )}
-                  </div>
-                )}
-
-                {activeOutputTab === 'instagram' && (
-                  <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white uppercase">Instagram Reel Caption</span>
-                      <button
-                        onClick={() => handleCopy(`${activePayload.caption || ''}\n\n${(activePayload.hashtags || []).join(' ')}`, 'instagram')}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-                      >
-                        {copiedKey === 'instagram' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'instagram' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                    <p className="text-xs font-bold text-pink-400">{activePayload.hook || ""}</p>
-                    <p className="text-xs text-gray-300 whitespace-pre-line leading-relaxed">{activePayload.caption || "Generated Instagram Reel caption..."}</p>
-                    {activePayload.hashtags && (
-                      <p className="text-[11px] text-cyan-400 font-mono">{activePayload.hashtags.join(' ')}</p>
-                    )}
-                  </div>
-                )}
-
-                {activeOutputTab === 'x' && (
-                  <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white uppercase">
-                        {activePayload.posts ? `X Thread (${activePayload.posts.length} Tweets)` : 'X Post'}
-                      </span>
-                      <button
-                        onClick={() => handleCopy(activePayload.posts ? activePayload.posts.join('\n\n---\n\n') : activePayload.post_text || '', 'x')}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-                      >
-                        {copiedKey === 'x' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'x' ? 'Copied' : 'Copy Thread'}</span>
-                      </button>
-                    </div>
-                    {activePayload.posts ? (
-                      <div className="space-y-2">
-                        {activePayload.posts.map((tweet: string, idx: number) => (
-                          <div key={idx} className="p-3 bg-[#111827] rounded-lg border border-[#1F2937] space-y-1">
-                            <div className="flex items-center justify-between text-[10px] text-gray-500 font-mono">
-                              <span>Tweet {idx + 1} of {activePayload.posts.length}</span>
-                              <span className={tweet.length > 280 ? 'text-rose-400' : 'text-emerald-400'}>
-                                {tweet.length} / 280 chars
-                              </span>
-                            </div>
-                            <p className="text-xs text-gray-200 whitespace-pre-line">{tweet}</p>
-                          </div>
-                        ))}
+                {activeGenItem ? (
+                  <div className="space-y-4 animate-fadeIn">
+                    {activePayload.hook && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Hook / Angle</span>
+                        <div className="p-3 bg-[#161B26] rounded-xl border border-[#1F2937] text-xs text-purple-200 font-semibold leading-relaxed">
+                          {activePayload.hook}
+                        </div>
                       </div>
-                    ) : (
-                      <p className="text-xs text-gray-300 whitespace-pre-line">{activePayload.post_text || "Generated X tweet..."}</p>
                     )}
-                  </div>
-                )}
 
-                {activeOutputTab === 'youtube' && (
-                  <div className="bg-[#161B26] border border-[#1F2937] rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white uppercase">YouTube Metadata & Chapters</span>
-                      <button
-                        onClick={() => handleCopy(`${activePayload.title || ''}\n\n${activePayload.description || ''}`, 'youtube')}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-                      >
-                        {copiedKey === 'youtube' ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'youtube' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-gray-500 font-mono block">Title</span>
-                      <p className="text-xs font-bold text-white">{activePayload.title || "YouTube Title"}</p>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-gray-500 font-mono block">Description</span>
-                      <p className="text-xs text-gray-300 whitespace-pre-line leading-relaxed">{activePayload.description || "Description..."}</p>
-                    </div>
-                    {activePayload.chapters?.length > 0 && (
-                      <div className="space-y-1 pt-1">
-                        <span className="text-[10px] text-gray-500 font-mono block">Timestamped Chapters</span>
-                        <div className="space-y-1">
-                          {activePayload.chapters.map((ch: any, idx: number) => (
-                            <div key={idx} className="flex items-center gap-2 text-xs font-mono">
-                              <span className="text-red-400 font-bold">{ch.timestamp}</span>
-                              <span className="text-gray-300">{ch.title}</span>
-                            </div>
+                    {activePayload.caption && (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Post Caption</span>
+                          <button
+                            onClick={() => handleCopy(activePayload.caption, 'caption')}
+                            className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            {copiedKey === 'caption' ? <CheckCheck className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedKey === 'caption' ? 'Copied' : 'Copy'}</span>
+                          </button>
+                        </div>
+                        <div className="p-3.5 bg-[#161B26] rounded-xl border border-[#1F2937] text-xs text-gray-200 whitespace-pre-wrap leading-relaxed">
+                          {activePayload.caption}
+                        </div>
+                      </div>
+                    )}
+
+                    {activePayload.hashtags && activePayload.hashtags.length > 0 && (
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Optimized Hashtags</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {activePayload.hashtags.map((h: string, idx: number) => (
+                            <span key={idx} className="text-xs bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded-lg border border-indigo-500/20 font-mono">
+                              #{h}
+                            </span>
                           ))}
                         </div>
                       </div>
                     )}
                   </div>
+                ) : (
+                  <div className="text-center py-12 border border-dashed border-[#1F2937] rounded-xl space-y-3 bg-[#161B26]/30">
+                    <Sparkles className="w-8 h-8 text-indigo-400 mx-auto opacity-50" />
+                    <p className="text-xs text-gray-400">No content generated for {activeOutputTab.toUpperCase()} yet.</p>
+                    <button
+                      onClick={() => handleRegeneratePlatform(activeOutputTab)}
+                      disabled={isRegenerating}
+                      className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition-all"
+                    >
+                      Generate for {activeOutputTab.toUpperCase()}
+                    </button>
+                  </div>
                 )}
               </div>
             </>
           )}
+
+          {/* Phase 7: Real Publication History Section */}
+          <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-xs uppercase tracking-wider">
+                <Globe className="w-4 h-4 text-emerald-400" />
+                <span>Publication History</span>
+              </div>
+              <span className="text-xs text-gray-400">{publications.length} records</span>
+            </div>
+
+            {publications.length === 0 ? (
+              <div className="text-center py-6 border border-dashed border-[#1F2937] rounded-xl text-xs text-gray-500">
+                No publications sent to external platforms yet.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {publications.map((pub) => (
+                  <div key={pub.id} className="p-3.5 rounded-xl bg-[#161B26] border border-[#1F2937] flex items-center justify-between gap-3 text-xs">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white truncate max-w-[240px]">{pub.title}</span>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                          pub.status === 'PUBLISHED' ? 'bg-emerald-500/20 text-emerald-300' :
+                          pub.status === 'UPLOADING' || pub.status === 'QUEUED' ? 'bg-amber-500/20 text-amber-300 animate-pulse' :
+                          'bg-red-500/20 text-red-300'
+                        }`}>
+                          {pub.status}
+                        </span>
+                        <span className="text-[10px] text-gray-500 uppercase font-mono">
+                          {pub.platform} • {pub.privacy}
+                        </span>
+                      </div>
+                      {pub.error_message && (
+                        <p className="text-[11px] text-red-400 font-mono">{pub.error_message}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {pub.status === 'PUBLISHED' && pub.external_url && (
+                        <a
+                          href={pub.external_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-3 py-1 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 font-bold transition"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>View on YouTube</span>
+                        </a>
+                      )}
+
+                      {pub.status === 'FAILED' && (
+                        <button
+                          onClick={() => handleRetryPublication(pub.id)}
+                          disabled={retryingPubId === pub.id}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-bold transition"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${retryingPubId === pub.id ? 'animate-spin' : ''}`} />
+                          <span>Retry</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Phase 7 & 8: Real Multi-Platform Social Publication Studio Modal */}
+      {isPublishModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#111827] border border-[#1F2937] rounded-2xl w-full max-w-2xl p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#1F2937] pb-3">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Share2 className="w-5 h-5 text-indigo-400" />
+                <span>Multi-Platform Publishing Studio</span>
+              </div>
+              <button onClick={() => setIsPublishModalOpen(false)} className="text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {publishFeedback && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">
+                {publishFeedback}
+              </div>
+            )}
+
+            {/* Platform Multi-Select Grid */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-300 block">1. Select Target Social Destinations</label>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {[
+                  { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
+                  { id: 'instagram', label: 'Instagram', icon: InstagramIcon },
+                  { id: 'linkedin', label: 'LinkedIn', icon: LinkedinIcon },
+                  { id: 'x', label: 'X', icon: XIcon },
+                  { id: 'facebook', label: 'Facebook', icon: FacebookIcon },
+                  { id: 'tiktok', label: 'TikTok', icon: TiktokIcon }
+                ].map((p) => {
+                  const Icon = p.icon;
+                  const isSelected = selectedPlatforms.includes(p.id);
+                  const isConnected = connections.some(c => c.platform.toLowerCase() === p.id && c.status === 'CONNECTED');
+
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        if (isSelected) {
+                          if (selectedPlatforms.length > 1) {
+                            setSelectedPlatforms(prev => prev.filter(x => x !== p.id));
+                            if (activeModalPlatform === p.id) {
+                              const remaining = selectedPlatforms.filter(x => x !== p.id);
+                              setActiveModalPlatform(remaining[0] || 'youtube');
+                            }
+                          }
+                        } else {
+                          setSelectedPlatforms(prev => [...prev, p.id]);
+                          setActiveModalPlatform(p.id);
+                        }
+                      }}
+                      className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all text-xs font-semibold ${
+                        isSelected
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-md'
+                          : isConnected
+                          ? 'bg-[#161B26] border-[#1F2937] text-gray-300 hover:border-gray-600'
+                          : 'bg-[#161B26]/50 border-dashed border-gray-800 text-gray-500'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span className="text-[11px]">{p.label}</span>
+                      {isSelected ? (
+                        <CheckCircle2 className="w-3 h-3 text-indigo-400" />
+                      ) : isConnected ? (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      ) : (
+                        <span className="text-[8px] text-amber-400 font-mono">Setup</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Destination Specific Editors */}
+            <div className="space-y-3 bg-[#161B26] border border-[#1F2937] rounded-xl p-4">
+              {/* Platform Editor Tabs */}
+              <div className="flex items-center justify-between border-b border-[#1F2937] pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-300">2. Customize Metadata:</span>
+                  <div className="flex items-center gap-1">
+                    {selectedPlatforms.map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setActiveModalPlatform(p)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider transition ${
+                          activeModalPlatform === p
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-gray-400 hover:text-white bg-[#111827]'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                  Pre-flight Verified
+                </span>
+              </div>
+
+              {/* Active Platform Metadata Form */}
+              {(() => {
+                const p = activeModalPlatform;
+                const meta = platformMetaMap[p] || { connectionId: '', title: '', description: '', tags: '', privacy: 'PRIVATE' };
+                const matchingConns = connections.filter(c => c.platform.toLowerCase() === p && c.status === 'CONNECTED');
+
+                return (
+                  <div className="space-y-3 text-xs">
+                    {/* Account Selector */}
+                    <div>
+                      <label className="text-gray-400 font-medium block mb-1">Target Connected Account</label>
+                      {matchingConns.length > 0 ? (
+                        <select
+                          value={meta.connectionId}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPlatformMetaMap(prev => ({
+                              ...prev,
+                              [p]: { ...meta, connectionId: val }
+                            }));
+                          }}
+                          className="w-full bg-[#111827] border border-[#1F2937] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500 font-medium"
+                        >
+                          {matchingConns.map((conn) => (
+                            <option key={conn.id} value={conn.id}>
+                              {conn.account_name} ({conn.handle || conn.name})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-amber-300 text-[11px]">
+                          <span className="flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>No connected {p.toUpperCase()} account.</span>
+                          </span>
+                          <a href="/connections" className="underline font-bold text-white hover:text-amber-200">
+                            Connect in Settings
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Title (for YouTube, LinkedIn, Facebook, TikTok) */}
+                    {['youtube', 'linkedin', 'facebook', 'tiktok'].includes(p) && (
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <label className="text-gray-400 font-medium">Post Title / Hook</label>
+                          <span className="text-[10px] text-gray-500 font-mono">{meta.title.length}/100</span>
+                        </div>
+                        <input
+                          type="text"
+                          maxLength={100}
+                          value={meta.title}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPlatformMetaMap(prev => ({
+                              ...prev,
+                              [p]: { ...meta, title: val }
+                            }));
+                          }}
+                          className="w-full bg-[#111827] border border-[#1F2937] rounded-xl px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                          placeholder={`Enter title for ${p}...`}
+                        />
+                      </div>
+                    )}
+
+                    {/* Caption / Description / Text */}
+                    <div>
+                      <div className="flex justify-between mb-1">
+                        <label className="text-gray-400 font-medium">
+                          {p === 'x' ? 'Tweet Text (max 280)' : p === 'instagram' ? 'Instagram Caption' : 'Description / Copy'}
+                        </label>
+                        <span className="text-[10px] text-gray-500 font-mono">
+                          {meta.description.length}/{p === 'x' ? '280' : p === 'instagram' ? '2200' : '5000'}
+                        </span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        maxLength={p === 'x' ? 280 : p === 'instagram' ? 2200 : 5000}
+                        value={meta.description}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPlatformMetaMap(prev => ({
+                            ...prev,
+                            [p]: { ...meta, description: val }
+                          }));
+                        }}
+                        className="w-full bg-[#111827] border border-[#1F2937] rounded-xl p-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 resize-none font-mono text-[11px]"
+                        placeholder={`Customized ${p} caption & copy...`}
+                      />
+                    </div>
+
+                    {/* Tags & Privacy */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-gray-400 font-medium block mb-1">Hashtags / Tags</label>
+                        <input
+                          type="text"
+                          value={meta.tags}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPlatformMetaMap(prev => ({
+                              ...prev,
+                              [p]: { ...meta, tags: val }
+                            }));
+                          }}
+                          className="w-full bg-[#111827] border border-[#1F2937] rounded-xl px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
+                          placeholder="tag1, tag2"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-gray-400 font-medium block mb-1">Privacy Level</label>
+                        <select
+                          value={meta.privacy}
+                          onChange={(e) => {
+                            const val = e.target.value as any;
+                            setPlatformMetaMap(prev => ({
+                              ...prev,
+                              [p]: { ...meta, privacy: val }
+                            }));
+                          }}
+                          className="w-full bg-[#111827] border border-[#1F2937] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500 font-bold"
+                        >
+                          <option value="PRIVATE">🔒 Private / Self-Only</option>
+                          <option value="UNLISTED">🔗 Unlisted</option>
+                          <option value="PUBLIC">🌐 Public</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-[#1F2937]">
+              <span className="text-[11px] text-gray-500 flex items-center gap-1">
+                <Lock className="w-3 h-3 text-emerald-400" />
+                <span>Zero Plaintext Token Storage</span>
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsPublishModalOpen(false)}
+                  className="px-3.5 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold transition"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={handleConfirmPublish}
+                  disabled={isPublishing || selectedPlatforms.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition disabled:opacity-50"
+                >
+                  {isPublishing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+                  <span>{isPublishing ? "Dispatching Jobs..." : `Publish to ${selectedPlatforms.length} Platform(s)`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function RepurposeEditorPage() {
+export default function RepurposePage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-xs text-gray-500">Loading Studio...</div>}>
+    <Suspense fallback={<div className="p-8 text-xs text-gray-500 font-mono">Loading Repurpose Studio...</div>}>
       <RepurposeContent />
     </Suspense>
   );

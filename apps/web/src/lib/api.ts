@@ -2,7 +2,9 @@ import {
   ContentItem, ContentListResponse, SocialAccount, PublishingJob, 
   SystemLog, Transcript, ContentBrief, GeneratedContent,
   CarouselItem, CarouselListResponse, CarouselSlideItem,
-  ClipItem, ClipListResponse
+  ClipItem, ClipListResponse, CaptionCue, ClipCaptionsData,
+  PlatformConnectionItem, PublicationItem, PublicationCreateData,
+  BatchPublicationCreateData, BatchPublicationResponse
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -223,7 +225,15 @@ class ApiClient {
     return this.request<ClipItem>(`/api/clips/${clipId}`);
   }
 
-  async updateClip(clipId: string, data: { title?: string; hook?: string; start_time?: number; end_time?: number }): Promise<ClipItem> {
+  async updateClip(clipId: string, data: {
+    title?: string;
+    hook?: string;
+    start_time?: number;
+    end_time?: number;
+    caption_style?: string;
+    caption_enabled?: boolean;
+    highlight_keywords?: string[];
+  }): Promise<ClipItem> {
     return this.request<ClipItem>(`/api/clips/${clipId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -231,12 +241,90 @@ class ApiClient {
     });
   }
 
-  async generateClip(clipId: string, aspectRatios: string[] = ['9:16']): Promise<{ status: string; message: string }> {
+  async generateClip(
+    clipId: string,
+    options?: {
+      aspect_ratios?: string[];
+      include_thumbnail?: boolean;
+      burn_captions?: boolean;
+      caption_style?: string;
+      highlight_keywords?: string[];
+    } | string[],
+    burnCaptions: boolean = false,
+    captionStyle?: string
+  ): Promise<{ status: string; message: string }> {
+    let payload: any = {};
+    if (Array.isArray(options)) {
+      payload = {
+        aspect_ratios: options,
+        include_thumbnail: true,
+        burn_captions: burnCaptions,
+        caption_style: captionStyle
+      };
+    } else if (typeof options === 'object' && options !== null) {
+      payload = {
+        aspect_ratios: options.aspect_ratios || ['9:16'],
+        include_thumbnail: options.include_thumbnail !== false,
+        burn_captions: !!options.burn_captions,
+        caption_style: options.caption_style,
+        highlight_keywords: options.highlight_keywords
+      };
+    } else {
+      payload = {
+        aspect_ratios: ['9:16'],
+        include_thumbnail: true,
+        burn_captions: burnCaptions,
+        caption_style: captionStyle
+      };
+    }
+
     return this.request<{ status: string; message: string }>(`/api/clips/${clipId}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aspect_ratios: aspectRatios, include_thumbnail: true })
+      body: JSON.stringify(payload)
     });
+  }
+
+  async getClipCaptions(clipId: string): Promise<ClipCaptionsData> {
+    return this.request<ClipCaptionsData>(`/api/clips/${clipId}/captions`);
+  }
+
+  async updateClipCaptions(clipId: string, data: {
+    caption_style?: string;
+    caption_enabled?: boolean;
+    highlight_keywords?: string[];
+    custom_settings?: any;
+  }): Promise<ClipCaptionsData> {
+    return this.request<ClipCaptionsData>(`/api/clips/${clipId}/captions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async renderClipCaptions(
+    clipId: string,
+    aspectRatios: string[] = ['9:16'],
+    captionStyle?: string,
+    highlightKeywords?: string[]
+  ): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/clips/${clipId}/render-captions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        aspect_ratios: aspectRatios,
+        caption_style: captionStyle,
+        highlight_keywords: highlightKeywords
+      })
+    });
+  }
+
+  getClipSrtUrl(clipId: string): string {
+    return `${this.baseUrl}/api/clips/${clipId}/captions/export.srt`;
+  }
+
+  getClipVttUrl(clipId: string): string {
+    return `${this.baseUrl}/api/clips/${clipId}/captions/export.vtt`;
   }
 
   async deleteClip(clipId: string): Promise<{ status: string; message: string }> {
@@ -249,8 +337,8 @@ class ApiClient {
     return `${this.baseUrl}/api/clips/${clipId}/variant/${variantId}`;
   }
 
-  getClipStreamUrl(clipId: string): string {
-    return `${this.baseUrl}/api/clips/${clipId}/stream`;
+  getClipStreamUrl(clipId: string, preferCaptions: boolean = false): string {
+    return `${this.baseUrl}/api/clips/${clipId}/stream${preferCaptions ? '?prefer_captions=true' : ''}`;
   }
 
   // Legacy Adapters
@@ -292,6 +380,74 @@ class ApiClient {
 
   async getSystemLogs() {
     return this.request<SystemLog[]>('/api/system/logs');
+  }
+
+  // Phase 7 Platform Connections & Publications
+  async getPlatformConnections(): Promise<{ items: PlatformConnectionItem[]; total: number }> {
+    return this.request<{ items: PlatformConnectionItem[]; total: number }>('/api/connections');
+  }
+
+  async getPlatformConnection(id: string): Promise<PlatformConnectionItem> {
+    return this.request<PlatformConnectionItem>(`/api/connections/${id}`);
+  }
+
+  async startPlatformOAuth(platform: string): Promise<{ platform: string; authorization_url: string; state: string }> {
+    return this.request<{ platform: string; authorization_url: string; state: string }>(`/api/connections/${platform}/start`, {
+      method: 'POST'
+    });
+  }
+
+  async startYouTubeOAuth(): Promise<{ platform: string; authorization_url: string; state: string }> {
+    return this.startPlatformOAuth('youtube');
+  }
+
+  async disconnectConnection(connectionId: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/connections/${connectionId}/disconnect`, {
+      method: 'POST'
+    });
+  }
+
+  async refreshConnection(connectionId: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/connections/${connectionId}/refresh`, {
+      method: 'POST'
+    });
+  }
+
+  async createPublication(data: PublicationCreateData): Promise<PublicationItem> {
+    return this.request<PublicationItem>('/api/publications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async createBatchPublications(data: BatchPublicationCreateData): Promise<BatchPublicationResponse> {
+    return this.request<BatchPublicationResponse>('/api/publications/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async getPublications(contentId?: string): Promise<{ items: PublicationItem[]; total: number }> {
+    const qs = contentId ? `?content_id=${encodeURIComponent(contentId)}` : '';
+    return this.request<{ items: PublicationItem[]; total: number }>(`/api/publications${qs}`);
+  }
+
+  async getPublication(pubId: string): Promise<PublicationItem> {
+    return this.request<PublicationItem>(`/api/publications/${pubId}`);
+  }
+
+  async retryPublication(pubId: string): Promise<PublicationItem> {
+    return this.request<PublicationItem>(`/api/publications/${pubId}/retry`, {
+      method: 'POST'
+    });
+  }
+
+  async cancelPublication(pubId: string): Promise<PublicationItem> {
+    return this.request<PublicationItem>(`/api/publications/${pubId}/cancel`, {
+      method: 'POST'
+    });
   }
 
   async publish(platform: string) {

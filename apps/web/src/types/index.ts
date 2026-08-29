@@ -150,6 +150,23 @@ export interface Asset {
   created_at?: string;
 }
 
+export interface CaptionCue {
+  start_time: number;
+  end_time: number;
+  text: string;
+  highlight_words: string[];
+}
+
+export interface ClipCaptionsData {
+  clip_id: string;
+  caption_style: string;
+  caption_enabled: boolean;
+  highlight_keywords: string[];
+  cues: CaptionCue[];
+  srt_content: string;
+  vtt_content: string;
+}
+
 export interface ClipVariantItem {
   id: string;
   clip_id: string;
@@ -161,6 +178,8 @@ export interface ClipVariantItem {
   height?: number;
   duration?: number;
   file_size: number;
+  has_captions?: boolean;
+  caption_style?: string;
   status: string;
   created_at?: string;
 }
@@ -177,11 +196,16 @@ export interface ClipItem {
   duration: number;
   status: string;
   score: number;
+  quality_score?: number;
   reason?: string;
   source_transcript_segment_ids?: string[];
   transcript_excerpt?: string;
   thumbnail_path?: string;
   discovery_version?: string;
+  caption_style?: string;
+  caption_enabled?: boolean;
+  highlight_keywords?: string[];
+  caption_custom_settings?: any;
   created_at?: string;
   updated_at?: string;
   variants?: ClipVariantItem[];
@@ -297,4 +321,131 @@ export interface SystemLog {
   timestamp: string;
   service: string;
   message: string;
+}
+
+export interface PlatformConnectionItem {
+  id: string;
+  platform: string;
+  name: string;
+  account_name: string;
+  handle: string;
+  external_account_id?: string;
+  status: 'CONNECTED' | 'DISCONNECTED' | 'REAUTH_REQUIRED' | 'EXPIRED';
+  avatar_url?: string;
+  capabilities: string[];
+  scopes: string[];
+  token_expires_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PublicationItem {
+  id: string;
+  content_id: string;
+  variant_id?: string;
+  platform_connection_id?: string;
+  platform: string;
+  status: 'DRAFT' | 'SCHEDULED' | 'QUEUED' | 'UPLOADING' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED' | 'REAUTH_REQUIRED' | 'CANCELLED';
+  title: string;
+  description?: string;
+  privacy: 'PRIVATE' | 'UNLISTED' | 'PUBLIC';
+  tags: string[];
+  external_post_id?: string;
+  external_url?: string;
+  error_code?: string;
+  error_message?: string;
+  attempt_count: number;
+  scheduled_at?: string;
+  timezone?: string;
+  claimed_at?: string;
+  claim_owner?: string;
+  cancelled_at?: string;
+  failed_at?: string;
+  created_at?: string;
+  updated_at?: string;
+  published_at?: string;
+}
+
+export interface PublicationCreateData {
+  content_id: string;
+  variant_id?: string;
+  platform_connection_id: string;
+  title: string;
+  description?: string;
+  tags?: string[];
+  privacy?: 'PRIVATE' | 'UNLISTED' | 'PUBLIC';
+}
+
+export interface PublicationDestinationData {
+  platform_connection_id: string;
+  title?: string;
+  description?: string;
+  privacy?: 'PRIVATE' | 'UNLISTED' | 'PUBLIC';
+  tags?: string[];
+}
+
+export interface BatchPublicationCreateData {
+  content_id: string;
+  variant_id?: string;
+  destinations: PublicationDestinationData[];
+}
+
+export interface BatchPublicationResponse {
+  publications: PublicationItem[];
+  queued_count: number;
+}
+
+// Phase 9: Scheduling & Calendar Interfaces
+export interface SchedulePublicationCreateData {
+  content_id: string;
+  variant_id?: string;
+  scheduled_time: string;
+  timezone: string;
+  destinations: PublicationDestinationData[];
+}
+
+export interface SchedulePublicationResponse {
+  publications: PublicationItem[];
+  scheduled_count: number;
+  scheduled_at_utc: string;
+  timezone: string;
+}
+
+export interface RescheduleData {
+  scheduled_time: string;
+  timezone?: string;
+}
+
+export interface CalendarEventItem {
+  id: string;
+  publication_id: string;
+  content_id: string;
+  content_title: string;
+  content_type: string;
+  thumbnail_path?: string | null;
+  variant_id?: string | null;
+  platform: string;
+  platform_connection_id?: string | null;
+  account_name?: string;
+  handle?: string;
+  status: string;
+  title: string;
+  description: string;
+  privacy: string;
+  scheduled_at: string;
+  scheduled_at_local: string;
+  timezone: string;
+  published_at?: string | null;
+  external_post_id?: string | null;
+  external_url?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export interface CalendarResponse {
+  items: CalendarEventItem[];
+  total: number;
+  start_utc: string;
+  end_utc: string;
+  timezone: string;
 }
