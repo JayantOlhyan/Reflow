@@ -1,93 +1,305 @@
 import asyncio
 import os
-import subprocess
-from typing import Dict, Any, Optional
+import json
+import uuid
+import tempfile
+from datetime import datetime
+from typing import Dict, Any, Optional, Tuple, List
+from sqlalchemy import select, update
+from config import settings
+from database import async_session_factory
+from models.entities import Content, Asset, ContentVariant, Job
+from services.storage_service import storage_service
+from utils.logging import get_logger
 
-class MediaProcessor:
-    def __init__(self, output_dir: str = "./storage/processed"):
-        self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)
+logger = get_logger("MediaService")
 
-    async def get_media_info(self, input_path: str) -> Dict[str, Any]:
-        """Probes video or image metadata using ffprobe."""
-        try:
-            cmd = [
-                "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration,size:stream=width,height,codec_name,r_frame_rate",
-                "-of", "json",
-                input_path
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode == 0:
-                import json
-                return json.loads(stdout.decode())
-        except Exception as e:
-            print(f"Error probing media {input_path}: {e}")
-        return {"streams": [{"width": 1920, "height": 1080}], "format": {"duration": "120"}}
+class MediaService:
+    def __init__(self):
+        self.ffmpeg_path = settings.FFMPEG_PATH
+        self.ffprobe_path = settings.FFPROBE_PATH
 
-    async def convert_aspect_ratio(
-        self,
-        input_path: str,
-        target_format: str = "9:16",
-        output_filename: Optional[str] = None
-    ) -> str:
-        """Converts video to target aspect ratio (9:16 vertical, 1:1 square, 4:5 portrait) with blurred background padding."""
-        if not output_filename:
-            basename = os.path.basename(input_path).split('.')[0]
-            output_filename = f"{basename}_{target_format.replace(':', '_')}.mp4"
-            
-        output_path = os.path.join(self.output_dir, output_filename)
-
-        filter_complex = {
-            "9:16": "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2[v]",
-            "1:1": "[0:v]scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2[v]",
-            "4:5": "[0:v]scale=1080:1350:force_original_aspect_ratio=decrease,pad=1080:1350:(ow-iw)/2:(oh-ih)/2[v]",
-            "16:9": "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2[v]"
-        }.get(target_format, "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2[v]")
-
+    async def probe_media(self, file_path: str) -> Dict[str, Any]:
+        """Probes video or image metadata using ffprobe safely."""
         cmd = [
-            "ffmpeg", "-y",
+            self.ffprobe_path,
+            "-v", "error",
+            "-show_entries", "format=duration,size,bit_rate:stream=width,height,codec_name,codec_type,r_frame_rate,bit_rate",
+            "-of", "json",
+            file_path
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err_msg = stderr.decode().strip()
+            raise ValueError(f"FFprobe failed to inspect media: {err_msg}")
+
+        data = json.loads(stdout.decode())
+        streams = data.get("streams", [])
+        fmt = data.get("format", {})
+
+        video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+        audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+        width = int(video_stream["width"]) if video_stream and "width" in video_stream else None
+        height = int(video_stream["height"]) if video_stream and "height" in video_stream else None
+        duration = int(float(fmt.get("duration", 0))) if fmt.get("duration") else None
+        bitrate = int(fmt.get("bit_rate", 0)) if fmt.get("bit_rate") else None
+        vcodec = video_stream.get("codec_name") if video_stream else None
+        acodec = audio_stream.get("codec_name") if audio_stream else None
+
+        fps = None
+        if video_stream and "r_frame_rate" in video_stream:
+            try:
+                num, den = video_stream["r_frame_rate"].split("/")
+                fps = round(float(num) / float(den)) if float(den) > 0 else None
+            except Exception:
+                fps = None
+
+        return {
+            "width": width,
+            "height": height,
+            "duration": duration,
+            "fps": fps,
+            "codec": vcodec,
+            "audio_codec": acodec,
+            "has_audio": audio_stream is not None,
+            "bitrate": bitrate,
+            "file_size": int(fmt.get("size", 0)) if fmt.get("size") else None
+        }
+
+    async def extract_audio(self, input_path: str, output_path: str) -> str:
+        """
+        Extracts clean audio as 16kHz mono MP3 for speech-to-text transcription.
+        """
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        cmd = [
+            self.ffmpeg_path, "-y",
             "-i", input_path,
-            "-vf", filter_complex,
-            "-c:a", "copy",
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-ar", "16000",
+            "-ac", "1",
+            "-b:a", "64k",
             output_path
         ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ValueError(f"Audio extraction failed: {stderr.decode().strip()}")
+        return output_path
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-            return output_path
-        except Exception as e:
-            print(f"FFmpeg conversion error: {e}")
-            return input_path
-
-    async def extract_thumbnail(self, input_path: str, timestamp: str = "00:00:02") -> str:
-        """Extracts a high-quality frame from video as JPEG thumbnail."""
-        output_path = os.path.join(self.output_dir, f"thumb_{os.path.basename(input_path)}.jpg")
+    async def generate_thumbnail(self, input_path: str, output_path: str, timestamp: str = "00:00:01") -> str:
+        """Extracts a high quality frame from the video as a JPEG thumbnail."""
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         cmd = [
-            "ffmpeg", "-y",
+            self.ffmpeg_path, "-y",
             "-ss", timestamp,
             "-i", input_path,
             "-vframes", "1",
             "-q:v", "2",
             output_path
         ]
-        try:
-            proc = await asyncio.create_subprocess_exec(*cmd)
-            await proc.communicate()
-            return output_path
-        except Exception as e:
-            print(f"Thumbnail extraction failed: {e}")
-            return ""
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ValueError(f"Thumbnail extraction failed: {stderr.decode().strip()}")
+        return output_path
 
-media_processor = MediaProcessor()
+    async def generate_variant(
+        self,
+        input_path: str,
+        output_path: str,
+        target_format: str,
+        has_audio: bool = True
+    ) -> str:
+        """
+        Transcodes video into target aspect ratio (16:9, 9:16, 1:1, 4:5)
+        using deterministic scaling/padding with black bars, H.264 video, and AAC audio.
+        """
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        filter_complex = {
+            "9:16": "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
+            "1:1": "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:color=black",
+            "4:5": "scale=1080:1350:force_original_aspect_ratio=decrease,pad=1080:1350:(ow-iw)/2:(oh-ih)/2:color=black",
+            "16:9": "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black",
+        }.get(target_format, "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black")
+
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", input_path,
+            "-vf", filter_complex,
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-preset", "fast",
+            "-crf", "22",
+            "-movflags", "+faststart"
+        ]
+
+        if has_audio:
+            cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+        else:
+            cmd.append("-an")
+
+        cmd.append(output_path)
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ValueError(f"FFmpeg variant generation for {target_format} failed: {stderr.decode().strip()}")
+        return output_path
+
+    async def validate_output(self, output_path: str, expected_type: str = "video") -> Dict[str, Any]:
+        """Validates that output exists, has size > 0, and is readable by FFprobe."""
+        if not os.path.exists(output_path):
+            raise ValueError(f"Output file {output_path} does not exist.")
+        size = os.path.getsize(output_path)
+        if size == 0:
+            raise ValueError(f"Output file {output_path} is empty (0 bytes).")
+        
+        meta = await self.probe_media(output_path)
+        if expected_type == "video" and not meta.get("width"):
+            raise ValueError(f"Output file {output_path} is not a valid video.")
+        return meta
+
+    async def process_content_media(self, content_id: str, asset_id: str) -> None:
+        """
+        Orchestrates full media processing for a video content asset:
+        1. Probes original asset metadata
+        2. Generates thumbnail
+        3. Generates 9:16, 1:1, 4:5, 16:9 variants atomically
+        4. Persists ContentVariant records in DB
+        5. Updates Content status to READY
+        """
+        logger.info(f"Starting media processing for Content: {content_id}, Asset: {asset_id}")
+
+        async with async_session_factory() as session:
+            # 1. Fetch Content & Asset records
+            content_res = await session.execute(select(Content).where(Content.id == content_id))
+            content = content_res.scalar_one_or_none()
+            asset_res = await session.execute(select(Asset).where(Asset.id == asset_id, Asset.content_id == content_id))
+            asset = asset_res.scalar_one_or_none()
+
+            if not content or not asset:
+                raise ValueError(f"Content {content_id} or Asset {asset_id} not found in database.")
+
+            original_path = storage_service.get_real_path(asset.storage_key)
+            if not os.path.exists(original_path):
+                raise ValueError(f"Original media file missing from storage: {asset.storage_key}")
+
+            # 2. Extract and update metadata
+            meta = await self.probe_media(original_path)
+            asset.width = meta["width"]
+            asset.height = meta["height"]
+            asset.duration = meta["duration"]
+            asset.fps = meta["fps"]
+            asset.codec = meta["codec"]
+            asset.bitrate = meta["bitrate"]
+
+            has_audio = meta.get("has_audio", True)
+            logger.info(f"Probed original media {asset.original_filename}: {meta['width']}x{meta['height']}, {meta['duration']}s, {meta['fps']}fps, codec: {meta['codec']}")
+
+            # Check existing variants for idempotency
+            existing_vars_res = await session.execute(select(ContentVariant).where(ContentVariant.content_id == content_id))
+            existing_variants = {v.variant_type: v for v in existing_vars_res.scalars().all()}
+
+            temp_dir = tempfile.mkdtemp(prefix=f"reflow_proc_{content_id}_")
+            try:
+                # 3. Generate Thumbnail
+                if "THUMBNAIL" not in existing_variants:
+                    thumb_temp = os.path.join(temp_dir, "thumb.jpg")
+                    await self.generate_thumbnail(original_path, thumb_temp, timestamp="00:00:01")
+                    thumb_meta = await self.validate_output(thumb_temp, expected_type="image")
+                    
+                    thumb_var_id = f"var_thumb_{uuid.uuid4().hex[:8]}"
+                    thumb_key = f"content/{content_id}/variants/{thumb_var_id}.jpg"
+                    
+                    with open(thumb_temp, "rb") as f:
+                        await storage_service.put(thumb_key, f.read())
+
+                    thumb_variant = ContentVariant(
+                        id=thumb_var_id,
+                        content_id=content_id,
+                        source_asset_id=asset_id,
+                        variant_type="THUMBNAIL",
+                        storage_key=thumb_key,
+                        mime_type="image/jpeg",
+                        file_size=thumb_meta.get("file_size") or os.path.getsize(thumb_temp),
+                        width=thumb_meta.get("width"),
+                        height=thumb_meta.get("height"),
+                        status="READY"
+                    )
+                    session.add(thumb_variant)
+                    content.thumbnail_path = thumb_key
+                    logger.info(f"Generated Thumbnail: {thumb_key}")
+
+                # 4. Generate Target Formats (9:16, 1:1, 4:5, 16:9)
+                target_formats = [
+                    ("VERTICAL_9_16", "9:16"),
+                    ("SQUARE_1_1", "1:1"),
+                    ("PORTRAIT_4_5", "4:5"),
+                    ("LANDSCAPE_16_9", "16:9")
+                ]
+
+                for var_type, fmt_ratio in target_formats:
+                    if var_type in existing_variants:
+                        logger.info(f"Variant {var_type} already exists for content {content_id}, skipping.")
+                        continue
+
+                    var_temp = os.path.join(temp_dir, f"var_{fmt_ratio.replace(':', '_')}.mp4")
+                    await self.generate_variant(original_path, var_temp, fmt_ratio, has_audio=has_audio)
+                    var_meta = await self.validate_output(var_temp, expected_type="video")
+
+                    var_id = f"var_{uuid.uuid4().hex[:8]}"
+                    var_key = f"content/{content_id}/variants/{fmt_ratio.replace(':', '_')}_{var_id}.mp4"
+
+                    with open(var_temp, "rb") as f:
+                        await storage_service.put(var_key, f.read())
+
+                    variant = ContentVariant(
+                        id=var_id,
+                        content_id=content_id,
+                        source_asset_id=asset_id,
+                        variant_type=var_type,
+                        storage_key=var_key,
+                        mime_type="video/mp4",
+                        file_size=var_meta.get("file_size") or os.path.getsize(var_temp),
+                        width=var_meta.get("width"),
+                        height=var_meta.get("height"),
+                        duration=var_meta.get("duration"),
+                        fps=var_meta.get("fps"),
+                        codec=var_meta.get("codec"),
+                        status="READY"
+                    )
+                    session.add(variant)
+                    logger.info(f"Generated Variant {var_type} ({fmt_ratio}): {var_key} ({var_meta.get('width')}x{var_meta.get('height')})")
+
+                content.status = "READY"
+                await session.commit()
+                logger.info(f"All media variants generated successfully for Content {content_id}.")
+            finally:
+                # Cleanup temp directory
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+media_processor = MediaService()
