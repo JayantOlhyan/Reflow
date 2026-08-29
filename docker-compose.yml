@@ -31,6 +31,10 @@ services:
       - STORAGE_DIR=/app/storage
       - REDIS_URL=redis://redis:6379/0
       - REDIS_MEDIA_QUEUE=reflow:media_jobs
+      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-reflow_dev_secret_key_change_in_production_32b}
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
+      - YOUTUBE_REDIRECT_URI=${YOUTUBE_REDIRECT_URI:-http://localhost:8000/api/connections/youtube/callback}
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,6 +58,33 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - REDIS_MEDIA_QUEUE=reflow:media_jobs
       - MEDIA_WORKER_CONCURRENCY=1
+      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-reflow_dev_secret_key_change_in_production_32b}
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
+      - YOUTUBE_REDIRECT_URI=${YOUTUBE_REDIRECT_URI:-http://localhost:8000/api/connections/youtube/callback}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: reflow_scheduler
+    command: ["python", "scheduler.py"]
+    volumes:
+      - storage_data:/app/storage
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow
+      - STORAGE_PROVIDER=local
+      - STORAGE_DIR=/app/storage
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_MEDIA_QUEUE=reflow:media_jobs
+      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-reflow_dev_secret_key_change_in_production_32b}
     depends_on:
       postgres:
         condition: service_healthy

@@ -4,7 +4,9 @@ import {
   CarouselItem, CarouselListResponse, CarouselSlideItem,
   ClipItem, ClipListResponse, CaptionCue, ClipCaptionsData,
   PlatformConnectionItem, PublicationItem, PublicationCreateData,
-  BatchPublicationCreateData, BatchPublicationResponse
+  BatchPublicationCreateData, BatchPublicationResponse,
+  SchedulePublicationCreateData, SchedulePublicationResponse,
+  RescheduleData, CalendarEventItem, CalendarResponse
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -447,6 +449,42 @@ class ApiClient {
   async cancelPublication(pubId: string): Promise<PublicationItem> {
     return this.request<PublicationItem>(`/api/publications/${pubId}/cancel`, {
       method: 'POST'
+    });
+  }
+
+  async schedulePublications(data: SchedulePublicationCreateData): Promise<SchedulePublicationResponse> {
+    return this.request<SchedulePublicationResponse>('/api/publications/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async getScheduledPublications(): Promise<{ items: PublicationItem[]; total: number }> {
+    return this.request<{ items: PublicationItem[]; total: number }>('/api/publications/scheduled');
+  }
+
+  async getCalendarEvents(params: {
+    start: string;
+    end: string;
+    timezone?: string;
+    platform?: string;
+    status?: string;
+  }): Promise<CalendarResponse> {
+    const query = new URLSearchParams();
+    query.set('start', params.start);
+    query.set('end', params.end);
+    if (params.timezone) query.set('timezone', params.timezone);
+    if (params.platform) query.set('platform', params.platform);
+    if (params.status) query.set('status', params.status);
+    return this.request<CalendarResponse>(`/api/calendar?${query.toString()}`);
+  }
+
+  async reschedulePublication(pubId: string, data: RescheduleData): Promise<PublicationItem> {
+    return this.request<PublicationItem>(`/api/publications/${pubId}/reschedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
     });
   }
 
