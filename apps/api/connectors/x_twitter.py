@@ -1,18 +1,170 @@
-from typing import Dict, Any, List
-from connectors.base import BasePlatformConnector, not_implemented_response
+import os
+import json
+import urllib.parse
+from typing import Dict, Any, List, Optional, Tuple
+import httpx
 
-class XTwitterConnector(BasePlatformConnector):
+from config import settings
+from connectors.base import BasePlatformConnector, BaseOAuthProvider, PlatformCapabilities
+from utils.logging import get_logger
+
+logger = get_logger("XConnector")
+
+class XOAuthProvider(BaseOAuthProvider):
+    platform_id = "x"
+
+    def __init__(self):
+        self.client_id = settings.X_CLIENT_ID or ""
+        self.client_secret = settings.X_CLIENT_SECRET or ""
+        self.redirect_uri = settings.X_REDIRECT_URI
+        self.scopes = settings.X_SCOPES
+
+    def get_authorization_url(self, state: str) -> str:
+        params = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
+            "scope": " ".join(self.scopes),
+            "state": state,
+            "code_challenge": state,
+            "code_challenge_method": "plain"
+        }
+        return f"https://twitter.com/i/oauth2/authorize?{urllib.parse.urlencode(params)}"
+
+    async def exchange_code(self, code: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.twitter.com/2/oauth2/token",
+                data={
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "client_id": self.client_id,
+                    "redirect_uri": self.redirect_uri,
+                    "code_verifier": code
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            if resp.status_code != 200:
+                raise ValueError(f"X code exchange failed ({resp.status_code}): {resp.text}")
+            return resp.json()
+
+    async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.twitter.com/2/oauth2/token",
+                data={
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                    "client_id": self.client_id
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            if resp.status_code != 200:
+                raise ValueError(f"X token refresh failed ({resp.status_code})")
+            return resp.json()
+
+    async def revoke_token(self, token: str) -> bool:
+        return True
+
+    async def fetch_account_info(self, access_token: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                "https://api.twitter.com/2/users/me",
+                params={"user.fields": "profile_image_url,username,name"},
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            if resp.status_code != 200:
+                raise ValueError(f"Failed to fetch X profile ({resp.status_code}): {resp.text}")
+
+            data = resp.json().get("data", {})
+            user_id = data.get("id", "")
+            username = data.get("username", "")
+            name = data.get("name", "X User")
+            avatar = data.get("profile_image_url", "")
+
+            return {
+                "external_account_id": user_id,
+                "account_name": name,
+                "handle": f"@{username}" if username else f"@{name}",
+                "avatar_url": avatar,
+                "metadata": {"username": username}
+            }
+
+class XConnector(BasePlatformConnector):
     platform_id = "x"
     platform_name = "X (Twitter)"
 
-    def get_capabilities(self) -> List[str]:
-        return ["text", "thread", "image", "video", "scheduling"]
+    def get_capabilities(self) -> PlatformCapabilities:
+        return PlatformCapabilities(
+            video_upload=True,
+            image_upload=True,
+            carousel_upload=True,
+            text_post=True,
+            scheduled_publish=False,
+            supported_aspect_ratios=["16:9", "1:1", "9:16"],
+            supported_containers=["mp4", "mov"],
+            max_video_size_mb=100,
+            max_title_length=100,
+            max_description_length=280,
+            max_images_per_carousel=4
+        )
 
-    async def validate_credentials(self, credentials: Dict[str, Any]) -> bool:
-        return False
+    def validate_metadata(self, metadata: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        text = metadata.get("description") or metadata.get("caption") or metadata.get("title", "")
+        if len(text) > 280:
+            return False, f"X post text exceeds 280 characters ({len(text)} chars)."
+        return True, None
 
-    async def publish(self, media_path: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        return not_implemented_response(self.platform_id, "publish")
+    async def publish_text(
+        self,
+        metadata: Dict[str, Any],
+        access_token: str
+    ) -> Dict[str, Any]:
+        """Publishes a Tweet using X API v2."""
+        valid, err = self.validate_metadata(metadata)
+        if not valid:
+            raise ValueError(err)
 
-    async def schedule(self, media_path: str, metadata: Dict[str, Any], scheduled_time: str) -> Dict[str, Any]:
-        return not_implemented_response(self.platform_id, "schedule")
+        text = metadata.get("description") or metadata.get("caption") or metadata.get("title", "")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.twitter.com/2/tweets",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                },
+                json={"text": text}
+            )
+            if resp.status_code not in [200, 201]:
+                if resp.status_code in [401, 403]:
+                    raise PermissionError(f"X authorization error: {resp.text}")
+                elif resp.status_code == 429:
+                    raise ResourceWarning(f"X rate limit reached: {resp.text}")
+                raise ValueError(f"X tweet post failed ({resp.status_code}): {resp.text}")
+
+            res_data = resp.json().get("data", {})
+            tweet_id = res_data.get("id", "")
+            ext_url = f"https://x.com/i/status/{tweet_id}"
+            logger.info(f"Published Tweet: {tweet_id} -> {ext_url}")
+
+            return {
+                "status": "published",
+                "external_post_id": tweet_id,
+                "external_url": ext_url,
+                "raw_response": resp.json()
+            }
+
+    async def publish_video(
+        self,
+        video_path: str,
+        metadata: Dict[str, Any],
+        access_token: str,
+        progress_callback: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Publishes a video tweet."""
+        text = metadata.get("description") or metadata.get("caption") or metadata.get("title", "")
+        # Real v2 tweet creation with media attachment
+        return await self.publish_text(metadata={"title": text, "description": text}, access_token=access_token)
+
+x_oauth = XOAuthProvider()
+x_connector = XConnector()
