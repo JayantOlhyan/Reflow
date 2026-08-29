@@ -169,6 +169,24 @@ class Settings(BaseSettings):
         description="Policy for missed publications on recovery: 'EXECUTE_IMMEDIATELY' | 'MARK_FAILED'"
     )
 
+    # Phase 10: Analytics & Performance Intelligence Configuration
+    ANALYTICS_SYNC_INTERVAL_MINUTES: int = Field(
+        default=60,
+        description="Interval in minutes for scheduler to sweep and queue metrics sync for active publications"
+    )
+    ANALYTICS_STALE_AFTER_HOURS: int = Field(
+        default=24,
+        description="Hours after which an analytics snapshot is marked stale in UI"
+    )
+    MIN_ANALYTICS_SAMPLE_SIZE: int = Field(
+        default=50,
+        description="Minimum views/impressions threshold before declaring top-performing rank"
+    )
+    ANALYTICS_REFRESH_COOLDOWN_SECONDS: int = Field(
+        default=60,
+        description="Cooldown in seconds between manual user-initiated analytics refresh requests"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -72,6 +72,10 @@ async def init_db():
                 ("publications", "claim_owner", "VARCHAR(64)"),
                 ("publications", "cancelled_at", "DATETIME"),
                 ("publications", "failed_at", "DATETIME"),
+                ("publications", "analytics_status", "VARCHAR(32) DEFAULT 'NOT_SYNCED'"),
+                ("publications", "last_analytics_sync_at", "DATETIME"),
+                ("publications", "analytics_error_code", "VARCHAR(64)"),
+                ("publications", "analytics_error_message", "TEXT"),
             ]
             for tbl, col, col_def in migrations:
                 try:
@@ -81,6 +85,8 @@ async def init_db():
 
             try:
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_publications_status_scheduled_at ON publications (status, scheduled_at)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_snapshots_pub_captured ON post_metric_snapshots (publication_id, captured_at)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_snapshots_platform_captured ON post_metric_snapshots (platform, captured_at)"))
             except Exception:
                 pass
 

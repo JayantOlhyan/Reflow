@@ -382,6 +382,12 @@ class Publication(Base):
     failed_at = Column(DateTime, nullable=True)
     published_at = Column(DateTime, nullable=True)
 
+    # Phase 10: Analytics tracking state
+    analytics_status = Column(String(32), default="NOT_SYNCED", index=True) # NOT_SYNCED, SYNCING, AVAILABLE, PARTIAL, UNAVAILABLE, FAILED, REAUTH_REQUIRED
+    last_analytics_sync_at = Column(DateTime, nullable=True)
+    analytics_error_code = Column(String(64), nullable=True)
+    analytics_error_message = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -391,11 +397,53 @@ class Publication(Base):
 
     content = relationship("Content", back_populates="publications")
     connection = relationship("PlatformConnection", back_populates="publications")
+    snapshots = relationship("PostMetricSnapshot", back_populates="publication", cascade="all, delete-orphan", order_by="PostMetricSnapshot.captured_at.desc()", lazy="selectin")
 
     @property
     def tags(self):
         try: return json.loads(self.tags_json)
         except: return []
+
+class PostMetricSnapshot(Base):
+    __tablename__ = "post_metric_snapshots"
+
+    id = Column(String(64), primary_key=True, index=True)
+    publication_id = Column(String(64), ForeignKey("publications.id", ondelete="CASCADE"), nullable=False, index=True)
+    platform = Column(String(32), nullable=False, index=True)
+    external_post_id = Column(String(128), nullable=True, index=True)
+    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    # Standardized typed metric fields (all nullable; NULL means unavailable from API, 0 means reported zero)
+    views = Column(Integer, nullable=True)
+    impressions = Column(Integer, nullable=True)
+    reach = Column(Integer, nullable=True)
+    likes = Column(Integer, nullable=True)
+    comments = Column(Integer, nullable=True)
+    shares = Column(Integer, nullable=True)
+    saves = Column(Integer, nullable=True)
+    clicks = Column(Integer, nullable=True)
+    reposts = Column(Integer, nullable=True)
+    replies = Column(Integer, nullable=True)
+    engagements = Column(Integer, nullable=True)
+    watch_time_seconds = Column(Float, nullable=True)
+    average_watch_time_seconds = Column(Float, nullable=True)
+    completion_rate = Column(Float, nullable=True)
+    followers_gained = Column(Integer, nullable=True)
+
+    raw_metrics_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_snapshots_pub_captured", "publication_id", "captured_at"),
+        Index("ix_snapshots_platform_captured", "platform", "captured_at"),
+    )
+
+    publication = relationship("Publication", back_populates="snapshots")
+
+    @property
+    def raw_metrics(self):
+        try: return json.loads(self.raw_metrics_json)
+        except: return {}
 
 class Workflow(Base):
     __tablename__ = "workflows"

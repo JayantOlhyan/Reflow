@@ -76,6 +76,12 @@ class HealthService:
             "details": f"Instance: {telemetry['instance_id']}, Lag: {telemetry['lag_seconds']}s"
         }
 
+    def check_analytics(self) -> Dict[str, str]:
+        return {
+            "status": "healthy",
+            "details": f"Sync Interval: {settings.ANALYTICS_SYNC_INTERVAL_MINUTES}m, Stale Threshold: {settings.ANALYTICS_STALE_AFTER_HOURS}h"
+        }
+
     async def get_overall_health(self) -> Dict[str, Any]:
         db_res = await self.check_database()
         storage_res = await self.check_storage()
@@ -83,6 +89,7 @@ class HealthService:
         redis_res = await self.check_redis()
         ai_res = self.check_ai_providers()
         scheduler_res = self.check_scheduler()
+        analytics_res = self.check_analytics()
 
         components = {
             "database": db_res,
@@ -90,7 +97,8 @@ class HealthService:
             "ffmpeg": ffmpeg_res,
             "redis": redis_res,
             "ai": ai_res,
-            "scheduler": scheduler_res
+            "scheduler": scheduler_res,
+            "analytics": analytics_res
         }
 
         # Overall status is healthy if critical services (db & storage) are healthy

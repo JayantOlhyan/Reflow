@@ -622,3 +622,101 @@ class HealthResponse(BaseModel):
     status: str
     timestamp: str
     components: Dict[str, HealthComponentStatus]
+
+# ------------------------------------------------------------------------------
+# Phase 10: Real Analytics & Performance Intelligence Schemas
+# ------------------------------------------------------------------------------
+
+class PostMetricSnapshotResponse(BaseModel):
+    id: str
+    publication_id: str
+    platform: str
+    external_post_id: Optional[str] = None
+    captured_at: datetime
+    views: Optional[int] = None
+    impressions: Optional[int] = None
+    reach: Optional[int] = None
+    likes: Optional[int] = None
+    comments: Optional[int] = None
+    shares: Optional[int] = None
+    saves: Optional[int] = None
+    clicks: Optional[int] = None
+    reposts: Optional[int] = None
+    replies: Optional[int] = None
+    engagements: Optional[int] = None
+    watch_time_seconds: Optional[float] = None
+    average_watch_time_seconds: Optional[float] = None
+    completion_rate: Optional[float] = None
+    followers_gained: Optional[int] = None
+    engagement_rate: Optional[float] = None
+    view_rate: Optional[float] = None
+    raw_metrics: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PublicationAnalyticsResponse(BaseModel):
+    publication: PublicationResponse
+    content_title: str
+    content_type: str
+    latest_snapshot: Optional[PostMetricSnapshotResponse] = None
+    snapshot_count: int = 0
+    snapshots: List[PostMetricSnapshotResponse] = []
+    views_per_hour: Optional[float] = None
+    engagements_per_hour: Optional[float] = None
+    is_stale: bool = False
+
+class AnalyticsOverviewResponse(BaseModel):
+    total_publications: int
+    total_views: Optional[int] = None
+    total_impressions: Optional[int] = None
+    total_reach: Optional[int] = None
+    total_engagements: Optional[int] = None
+    average_engagement_rate: Optional[float] = None
+    average_views_per_publication: Optional[float] = None
+    period_comparison: Optional[Dict[str, Any]] = None
+    start_date: datetime
+    end_date: datetime
+    last_synced_at: Optional[datetime] = None
+
+class AnalyticsTimeseriesItem(BaseModel):
+    date: str
+    views: Optional[int] = None
+    engagements: Optional[int] = None
+    publications_count: int = 0
+
+class AnalyticsTimeseriesResponse(BaseModel):
+    items: List[AnalyticsTimeseriesItem]
+    total_days: int
+
+class PlatformAnalyticsItem(BaseModel):
+    platform: str
+    publication_count: int
+    total_views: Optional[int] = None
+    total_impressions: Optional[int] = None
+    total_engagements: Optional[int] = None
+    engagement_rate: Optional[float] = None
+    supports_analytics: bool = False
+    supported_metrics: List[str] = []
+
+class ContentAnalyticsItem(BaseModel):
+    content_id: str
+    title: str
+    content_type: str
+    thumbnail_path: Optional[str] = None
+    publication_count: int
+    platforms: List[str]
+    total_views: Optional[int] = None
+    total_engagements: Optional[int] = None
+    engagement_rate: Optional[float] = None
+    top_platform: Optional[str] = None
+    latest_published_at: Optional[datetime] = None
+
+class AnalyticsBackfillRequest(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    platform: Optional[str] = None
+    limit: int = 50
+
+class AnalyticsBackfillResponse(BaseModel):
+    queued_count: int
+    message: str
