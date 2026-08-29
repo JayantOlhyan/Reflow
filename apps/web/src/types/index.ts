@@ -150,6 +150,48 @@ export interface Asset {
   created_at?: string;
 }
 
+export interface ClipVariantItem {
+  id: string;
+  clip_id: string;
+  variant_type: string;
+  aspect_ratio: string;
+  storage_key: string;
+  mime_type: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  file_size: number;
+  status: string;
+  created_at?: string;
+}
+
+export interface ClipItem {
+  id: string;
+  content_id: string;
+  source_asset_id?: string;
+  title: string;
+  description?: string;
+  hook?: string;
+  start_time: number;
+  end_time: number;
+  duration: number;
+  status: string;
+  score: number;
+  reason?: string;
+  source_transcript_segment_ids?: string[];
+  transcript_excerpt?: string;
+  thumbnail_path?: string;
+  discovery_version?: string;
+  created_at?: string;
+  updated_at?: string;
+  variants?: ClipVariantItem[];
+}
+
+export interface ClipListResponse {
+  items: ClipItem[];
+  total: number;
+}
+
 export interface ContentItem {
   id: string;
   title: string;
@@ -166,6 +208,7 @@ export interface ContentItem {
   briefs?: ContentBrief[];
   generated_contents?: GeneratedContent[];
   carousels?: CarouselItem[];
+  clips?: ClipItem[];
 }
 
 export interface ContentListResponse {

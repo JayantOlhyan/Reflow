@@ -1,7 +1,8 @@
 import { 
   ContentItem, ContentListResponse, SocialAccount, PublishingJob, 
   SystemLog, Transcript, ContentBrief, GeneratedContent,
-  CarouselItem, CarouselListResponse, CarouselSlideItem
+  CarouselItem, CarouselListResponse, CarouselSlideItem,
+  ClipItem, ClipListResponse
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -203,6 +204,53 @@ class ApiClient {
 
   getExportDownloadUrl(carouselId: string, exportId: string): string {
     return `${this.baseUrl}/api/carousels/${carouselId}/export/${exportId}`;
+  }
+
+  // Phase 5 Clip Engine
+  async discoverClips(contentId: string, options?: { min_duration?: number; max_duration?: number; target_count?: number; force_refresh?: boolean }): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/content/${contentId}/clips/discover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {})
+    });
+  }
+
+  async getContentClips(contentId: string): Promise<ClipListResponse> {
+    return this.request<ClipListResponse>(`/api/content/${contentId}/clips`);
+  }
+
+  async getClip(clipId: string): Promise<ClipItem> {
+    return this.request<ClipItem>(`/api/clips/${clipId}`);
+  }
+
+  async updateClip(clipId: string, data: { title?: string; hook?: string; start_time?: number; end_time?: number }): Promise<ClipItem> {
+    return this.request<ClipItem>(`/api/clips/${clipId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async generateClip(clipId: string, aspectRatios: string[] = ['9:16']): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/clips/${clipId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aspect_ratios: aspectRatios, include_thumbnail: true })
+    });
+  }
+
+  async deleteClip(clipId: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/clips/${clipId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  getClipVariantUrl(clipId: string, variantId: string): string {
+    return `${this.baseUrl}/api/clips/${clipId}/variant/${variantId}`;
+  }
+
+  getClipStreamUrl(clipId: string): string {
+    return `${this.baseUrl}/api/clips/${clipId}/stream`;
   }
 
   // Legacy Adapters
