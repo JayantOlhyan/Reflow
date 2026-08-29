@@ -100,6 +100,8 @@ class FacebookConnector(BasePlatformConnector):
             carousel_upload=False,
             text_post=True,
             scheduled_publish=True,
+            supports_analytics=True,
+            supported_metrics=["views", "impressions", "likes", "comments", "shares"],
             supported_aspect_ratios=["16:9", "1:1", "4:5", "9:16"],
             supported_containers=["mp4", "mov"],
             max_video_size_mb=500,
@@ -112,6 +114,43 @@ class FacebookConnector(BasePlatformConnector):
         if len(msg) > 5000:
             return False, f"Facebook message exceeds 5000 characters ({len(msg)} chars)."
         return True, None
+
+    async def get_post_metrics(
+        self,
+        external_post_id: str,
+        access_token: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetches post reactions/comments from Facebook Graph API."""
+        if not external_post_id:
+            return None
+
+        url = f"https://graph.facebook.com/v19.0/{external_post_id}"
+        params = {
+            "fields": "reactions.summary(total_count),comments.summary(total_count),shares",
+            "access_token": access_token
+        }
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code in [401, 403]:
+                raise ValueError("REAUTH_REQUIRED")
+            if resp.status_code == 429:
+                raise ValueError("RATE_LIMITED")
+            if resp.status_code != 200:
+                logger.warning(f"Facebook analytics fetch failed for {external_post_id}: {resp.status_code}")
+                return None
+
+            data = resp.json()
+            reactions = data.get("reactions", {}).get("summary", {}).get("total_count")
+            comments = data.get("comments", {}).get("summary", {}).get("total_count")
+            shares = data.get("shares", {}).get("count")
+
+            return {
+                "likes": int(reactions) if reactions is not None else None,
+                "comments": int(comments) if comments is not None else None,
+                "shares": int(shares) if shares is not None else None,
+                "raw": data
+            }
 
     async def publish_text(
         self,

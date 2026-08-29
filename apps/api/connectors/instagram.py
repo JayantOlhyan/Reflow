@@ -135,6 +135,8 @@ class InstagramConnector(BasePlatformConnector):
             carousel_upload=True,
             text_post=False,
             scheduled_publish=True,
+            supports_analytics=True,
+            supported_metrics=["views", "reach", "impressions", "likes", "comments", "saves", "shares"],
             supported_aspect_ratios=["9:16", "1:1", "4:5"],
             supported_containers=["mp4", "mov"],
             max_video_size_mb=300,
@@ -148,6 +150,65 @@ class InstagramConnector(BasePlatformConnector):
         if len(desc) > 2200:
             return False, f"Instagram caption exceeds 2200 characters ({len(desc)} chars)."
         return True, None
+
+    async def get_post_metrics(
+        self,
+        external_post_id: str,
+        access_token: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetches reach, impressions, likes, comments, saved, shares from Meta Graph API."""
+        if not external_post_id:
+            return None
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            basic_url = f"https://graph.facebook.com/v19.0/{external_post_id}"
+            basic_params = {"fields": "like_count,comments_count,media_type,media_product_type"}
+            basic_resp = await client.get(basic_url, params=basic_params, headers=headers)
+            
+            if basic_resp.status_code == 401 or (basic_resp.status_code == 400 and "OAuthException" in basic_resp.text):
+                raise ValueError("REAUTH_REQUIRED")
+            if basic_resp.status_code == 429:
+                raise ValueError("RATE_LIMITED")
+            if basic_resp.status_code != 200:
+                logger.warning(f"Instagram media fetch failed for {external_post_id}: {basic_resp.status_code}")
+                return None
+
+            basic_data = basic_resp.json()
+            likes = basic_data.get("like_count")
+            comments = basic_data.get("comments_count")
+
+            insights_url = f"https://graph.facebook.com/v19.0/{external_post_id}/insights"
+            insights_params = {"metric": "reach,impressions,saved,shares,plays"}
+            insights_resp = await client.get(insights_url, params=insights_params, headers=headers)
+
+            reach = None
+            impressions = None
+            saves = None
+            shares = None
+            views = None
+
+            if insights_resp.status_code == 200:
+                ins_data = insights_resp.json().get("data", [])
+                for item in ins_data:
+                    name = item.get("name")
+                    val = item.get("values", [{}])[0].get("value")
+                    if name == "reach": reach = int(val) if val is not None else None
+                    elif name == "impressions": impressions = int(val) if val is not None else None
+                    elif name == "saved": saves = int(val) if val is not None else None
+                    elif name == "shares": shares = int(val) if val is not None else None
+                    elif name == "plays": views = int(val) if val is not None else None
+
+            return {
+                "views": views or impressions,
+                "impressions": impressions,
+                "reach": reach,
+                "likes": int(likes) if likes is not None else None,
+                "comments": int(comments) if comments is not None else None,
+                "saves": saves,
+                "shares": shares,
+                "raw": basic_data
+            }
 
     async def publish_video(
         self,

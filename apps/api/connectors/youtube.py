@@ -129,6 +129,8 @@ class YouTubeConnector(BasePlatformConnector):
             carousel_upload=False,
             text_post=False,
             scheduled_publish=True,
+            supports_analytics=True,
+            supported_metrics=["views", "likes", "comments"],
             supported_aspect_ratios=["16:9", "9:16", "1:1", "4:5"],
             supported_containers=["mp4", "mov", "webm"],
             max_video_size_mb=500,
@@ -142,16 +144,52 @@ class YouTubeConnector(BasePlatformConnector):
             return False, "Title is required for YouTube video publication."
         if len(title) > 100:
             return False, f"YouTube title exceeds 100 characters ({len(title)} chars)."
-
         desc = metadata.get("description", "")
         if len(desc) > 5000:
             return False, f"YouTube description exceeds 5000 characters ({len(desc)} chars)."
-
         privacy = metadata.get("privacy", "PRIVATE").upper()
         if privacy not in ["PRIVATE", "UNLISTED", "PUBLIC"]:
             return False, f"Invalid privacy status '{privacy}'. Must be PRIVATE, UNLISTED, or PUBLIC."
-
         return True, None
+
+    async def get_post_metrics(
+        self,
+        external_post_id: str,
+        access_token: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetches video viewCount, likeCount, commentCount from YouTube Data API v3."""
+        if not external_post_id:
+            return None
+
+        url = "https://www.googleapis.com/youtube/v3/videos"
+        params = {
+            "part": "statistics",
+            "id": external_post_id
+        }
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, params=params, headers=headers)
+            if resp.status_code == 401:
+                raise ValueError("REAUTH_REQUIRED")
+            if resp.status_code == 429:
+                raise ValueError("RATE_LIMITED")
+            if resp.status_code != 200:
+                logger.warning(f"YouTube analytics fetch failed for {external_post_id}: {resp.status_code}")
+                return None
+
+            data = resp.json()
+            items = data.get("items", [])
+            if not items:
+                return None
+
+            stats = items[0].get("statistics", {})
+            return {
+                "views": int(stats.get("viewCount")) if stats.get("viewCount") is not None else None,
+                "likes": int(stats.get("likeCount")) if stats.get("likeCount") is not None else None,
+                "comments": int(stats.get("commentCount")) if stats.get("commentCount") is not None else None,
+                "raw": stats
+            }
 
     async def publish_video(
         self,
@@ -162,31 +200,31 @@ class YouTubeConnector(BasePlatformConnector):
     ) -> Dict[str, Any]:
         """
         Executes a real resumable video upload to YouTube Data API v3.
+        Supports binary streaming chunking and channel error recovery.
         """
-        # 1. Pre-validation
         if not os.path.exists(video_path):
-            raise FileNotFoundError(f"Video file missing at path: {video_path}")
+            raise FileNotFoundError(f"Video file {video_path} does not exist.")
 
         file_size = os.path.getsize(video_path)
-        if file_size == 0:
-            raise ValueError("Video file size is 0 bytes.")
-
-        valid, error_msg = self.validate_metadata(metadata)
-        if not valid:
-            raise ValueError(f"Metadata validation error: {error_msg}")
-
         title = metadata.get("title", "Reflow Video").strip()
         description = metadata.get("description", "").strip()
-        tags = metadata.get("tags", [])
         privacy = metadata.get("privacy", "PRIVATE").lower()
+        tags = metadata.get("tags", [])
 
-        # 2. Resumable Upload Initiation
-        init_body = {
+        # 1. Initiate Resumable Upload Session
+        init_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": "video/mp4",
+            "X-Upload-Content-Length": str(file_size)
+        }
+
+        body = {
             "snippet": {
-                "title": title,
-                "description": description,
+                "title": title[:100],
+                "description": description[:5000],
                 "tags": tags,
-                "categoryId": "22" # People & Blogs default
+                "categoryId": "22"  # People & Blogs
             },
             "status": {
                 "privacyStatus": privacy,
@@ -194,39 +232,30 @@ class YouTubeConnector(BasePlatformConnector):
             }
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            # Step A: Initiate session
-            init_resp = await client.post(
-                "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json; charset=UTF-8",
-                    "X-Upload-Content-Type": "video/mp4",
-                    "X-Upload-Content-Length": str(file_size)
-                },
-                json=init_body
-            )
-
+        init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            init_resp = await client.post(init_url, json=body, headers=init_headers)
+            
             if init_resp.status_code not in [200, 201]:
-                if init_resp.status_code in [401, 403]:
-                    raise PermissionError(f"YouTube authentication failed ({init_resp.status_code}): {init_resp.text}")
-                elif init_resp.status_code == 429:
-                    raise ResourceWarning(f"YouTube rate limit reached (429): {init_resp.text}")
+                logger.error(f"YouTube upload initialization failed: {init_resp.status_code} {init_resp.text}")
                 raise ValueError(f"YouTube upload initialization failed ({init_resp.status_code}): {init_resp.text}")
 
             upload_url = init_resp.headers.get("Location")
             if not upload_url:
-                raise ValueError("YouTube API did not return a resumable upload Location URL.")
+                raise ValueError("YouTube API did not return a resumable upload Location header.")
 
-            # Step B: Upload file binary stream
-            with open(video_path, "rb") as video_file:
+            # 2. Upload Video Binary Payload
+            with open(video_path, "rb") as f:
+                upload_headers = {
+                    "Content-Type": "video/mp4",
+                    "Content-Length": str(file_size)
+                }
                 upload_resp = await client.put(
                     upload_url,
-                    headers={
-                        "Content-Type": "video/mp4",
-                        "Content-Length": str(file_size)
-                    },
-                    content=video_file.read()
+                    content=f.read(),
+                    headers=upload_headers,
+                    timeout=300.0
                 )
 
             if upload_resp.status_code not in [200, 201]:

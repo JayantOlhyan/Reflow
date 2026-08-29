@@ -101,6 +101,8 @@ class XConnector(BasePlatformConnector):
             carousel_upload=True,
             text_post=True,
             scheduled_publish=False,
+            supports_analytics=True,
+            supported_metrics=["views", "impressions", "likes", "reposts", "replies", "saves"],
             supported_aspect_ratios=["16:9", "1:1", "9:16"],
             supported_containers=["mp4", "mov"],
             max_video_size_mb=100,
@@ -114,6 +116,49 @@ class XConnector(BasePlatformConnector):
         if len(text) > 280:
             return False, f"X post text exceeds 280 characters ({len(text)} chars)."
         return True, None
+
+    async def get_post_metrics(
+        self,
+        external_post_id: str,
+        access_token: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetches public metrics from Twitter API v2 /2/tweets/:id."""
+        if not external_post_id:
+            return None
+
+        url = f"https://api.twitter.com/2/tweets/{external_post_id}"
+        params = {"tweet.fields": "public_metrics,non_public_metrics"}
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, params=params, headers=headers)
+            if resp.status_code in [401, 403]:
+                raise ValueError("REAUTH_REQUIRED")
+            if resp.status_code == 429:
+                raise ValueError("RATE_LIMITED")
+            if resp.status_code != 200:
+                logger.warning(f"X analytics fetch failed for {external_post_id}: {resp.status_code}")
+                return None
+
+            data = resp.json()
+            metrics = data.get("data", {}).get("public_metrics", {})
+            impressions = metrics.get("impression_count")
+            likes = metrics.get("like_count")
+            retweets = metrics.get("retweet_count")
+            replies = metrics.get("reply_count")
+            bookmarks = metrics.get("bookmark_count")
+
+            return {
+                "views": int(impressions) if impressions is not None else None,
+                "impressions": int(impressions) if impressions is not None else None,
+                "likes": int(likes) if likes is not None else None,
+                "reposts": int(retweets) if retweets is not None else None,
+                "shares": int(retweets) if retweets is not None else None,
+                "replies": int(replies) if replies is not None else None,
+                "comments": int(replies) if replies is not None else None,
+                "saves": int(bookmarks) if bookmarks is not None else None,
+                "raw": metrics
+            }
 
     async def publish_text(
         self,

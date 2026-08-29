@@ -100,6 +100,8 @@ class LinkedInConnector(BasePlatformConnector):
             carousel_upload=True,
             text_post=True,
             scheduled_publish=True,
+            supports_analytics=True,
+            supported_metrics=["views", "impressions", "clicks", "likes", "comments", "shares"],
             supported_aspect_ratios=["16:9", "1:1", "9:16", "4:5"],
             supported_containers=["mp4", "mov"],
             max_video_size_mb=200,
@@ -112,6 +114,49 @@ class LinkedInConnector(BasePlatformConnector):
         if len(text) > 3000:
             return False, f"LinkedIn post text exceeds 3000 characters ({len(text)} chars)."
         return True, None
+
+    async def get_post_metrics(
+        self,
+        external_post_id: str,
+        access_token: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetches social actions / share statistics from LinkedIn API."""
+        if not external_post_id:
+            return None
+
+        encoded_urn = urllib.parse.quote(external_post_id)
+        url = f"https://api.linkedin.com/v2/socialActions/{encoded_urn}"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "X-Restli-Protocol-Version": "2.0.0"
+        }
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code in [401, 403]:
+                raise ValueError("REAUTH_REQUIRED")
+            if resp.status_code == 429:
+                raise ValueError("RATE_LIMITED")
+            if resp.status_code != 200:
+                logger.warning(f"LinkedIn analytics fetch failed for {external_post_id}: {resp.status_code}")
+                return None
+
+            data = resp.json()
+            likes = data.get("likesSummary", {}).get("totalLikes")
+            comments = data.get("commentsSummary", {}).get("totalComments")
+            shares = data.get("sharesSummary", {}).get("totalShares")
+            views = data.get("viewsSummary", {}).get("totalViews")
+            clicks = data.get("clicksSummary", {}).get("totalClicks")
+
+            return {
+                "views": int(views) if views is not None else None,
+                "impressions": int(views) if views is not None else None,
+                "likes": int(likes) if likes is not None else None,
+                "comments": int(comments) if comments is not None else None,
+                "shares": int(shares) if shares is not None else None,
+                "clicks": int(clicks) if clicks is not None else None,
+                "raw": data
+            }
 
     async def publish_text(
         self,

@@ -9,6 +9,8 @@ class PlatformCapabilities:
     carousel_upload: bool = False
     text_post: bool = False
     scheduled_publish: bool = False
+    supports_analytics: bool = False
+    supported_metrics: List[str] = field(default_factory=list)
     supported_aspect_ratios: List[str] = field(default_factory=lambda: ["16:9", "9:16", "1:1", "4:5"])
     supported_containers: List[str] = field(default_factory=lambda: ["mp4", "mov"])
     max_video_size_mb: int = 500
@@ -95,6 +97,17 @@ class BasePlatformConnector(ABC):
     ) -> Dict[str, Any]:
         """Publishes a text/status post to the platform."""
         return not_implemented_response(self.platform_id, "text_post")
+
+    async def get_post_metrics(
+        self,
+        external_post_id: str,
+        access_token: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetches live post metrics from the platform API.
+        Returns a dict of raw provider metrics, or None if analytics are not supported.
+        """
+        return None
 
 def not_implemented_response(platform: str, operation: str) -> Dict[str, Any]:
     return {
