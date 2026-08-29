@@ -8,8 +8,9 @@ from typing import Dict, Any, Optional, Tuple, List
 from sqlalchemy import select, update
 from config import settings
 from database import async_session_factory
-from models.entities import Content, Asset, ContentVariant, Carousel, CarouselSlide, Clip, ClipVariant, Job
+from models.entities import Content, Asset, ContentVariant, Carousel, CarouselSlide, Clip, ClipVariant, Transcript, TranscriptSegment, Job
 from services.storage_service import storage_service
+from services.caption_service import caption_service, CaptionCue
 from utils.logging import get_logger
 
 logger = get_logger("MediaService")
@@ -345,11 +346,106 @@ class MediaService:
             raise ValueError(f"FFmpeg clip extraction failed: {stderr.decode().strip()}")
         return output_path
 
+    async def burn_captions_to_video(
+        self,
+        input_video_path: str,
+        output_video_path: str,
+        cues: List[CaptionCue],
+        width: int,
+        height: int,
+        style_name: str = "BOLD_PUNCH",
+        aspect_ratio: str = "9:16",
+        highlight_keywords: Optional[List[str]] = None,
+        has_audio: bool = True
+    ) -> str:
+        """
+        Hardcodes pixel-accurate styled caption cards onto video variants
+        using FFmpeg overlay filters and writes the result to output_video_path.
+        """
+        if not cues:
+            cmd = [self.ffmpeg_path, "-y", "-i", input_video_path, "-c", "copy", output_video_path]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc.communicate()
+            return output_video_path
+
+        temp_dir = tempfile.mkdtemp(prefix="reflow_caption_overlays_")
+        try:
+            overlay_paths = []
+            for idx, cue in enumerate(cues):
+                png_bytes = caption_service.create_caption_overlay_png(
+                    cue=cue,
+                    width=width,
+                    height=height,
+                    style_name=style_name,
+                    aspect_ratio=aspect_ratio,
+                    highlight_keywords=highlight_keywords
+                )
+                ov_path = os.path.join(temp_dir, f"ov_{idx:03d}.png")
+                with open(ov_path, "wb") as f:
+                    f.write(png_bytes)
+                overlay_paths.append(ov_path)
+
+            cmd = [self.ffmpeg_path, "-y", "-i", input_video_path]
+            for ov_path in overlay_paths:
+                cmd.extend(["-i", ov_path])
+
+            if len(cues) == 1:
+                c0 = cues[0]
+                filter_graph = f"[0:v][1:v]overlay=0:0:enable='between(t,{c0.start_time:.3f},{c0.end_time:.3f})'[outv]"
+            else:
+                steps = []
+                for idx, cue in enumerate(cues):
+                    prev_label = "[0:v]" if idx == 0 else f"[v{idx}]"
+                    next_label = "[outv]" if idx == len(cues) - 1 else f"[v{idx+1}]"
+                    input_idx = idx + 1
+                    steps.append(
+                        f"{prev_label}[{input_idx}:v]overlay=0:0:enable='between(t,{cue.start_time:.3f},{cue.end_time:.3f})'{next_label}"
+                    )
+                filter_graph = ";".join(steps)
+
+            cmd.extend([
+                "-filter_complex", filter_graph,
+                "-map", "[outv]"
+            ])
+            if has_audio:
+                cmd.extend(["-map", "0:a?", "-c:a", "aac", "-b:a", "128k"])
+            else:
+                cmd.append("-an")
+
+            cmd.extend([
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-preset", "fast",
+                "-crf", "20",
+                "-movflags", "+faststart",
+                output_video_path
+            ])
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise ValueError(f"FFmpeg caption burn-in failed: {stderr.decode().strip()}")
+
+            return output_video_path
+        finally:
+            try:
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
     async def process_clip_media(
         self,
         clip_id: str,
         aspect_ratios: Optional[List[str]] = None,
-        include_thumbnail: bool = True
+        include_thumbnail: bool = True,
+        burn_captions: bool = False,
+        caption_style: Optional[str] = None,
+        highlight_keywords: Optional[List[str]] = None
     ) -> None:
         """
         Extracts master video clip and generates requested aspect ratio variants atomically:
@@ -357,13 +453,14 @@ class MediaService:
         2. Cuts master.mp4 via FFmpeg extract_clip
         3. Probes master.mp4 via FFprobe
         4. Generates thumbnail
-        5. Generates requested variants (9:16, 1:1, 4:5, 16:9)
-        6. Persists ClipVariant records and marks Clip READY
+        5. Generates requested clean variants (9:16, 1:1, 4:5, 16:9)
+        6. If burn_captions is True, generates captioned variants preserving clean ones
+        7. Persists ClipVariant records and marks Clip READY
         """
         if aspect_ratios is None:
             aspect_ratios = ["9:16"]
 
-        logger.info(f"Starting media processing for Clip {clip_id} (Ratios: {aspect_ratios})")
+        logger.info(f"Starting media processing for Clip {clip_id} (Ratios: {aspect_ratios}, Captions: {burn_captions})")
 
         async with async_session_factory() as session:
             clip_res = await session.execute(select(Clip).where(Clip.id == clip_id))
@@ -372,6 +469,10 @@ class MediaService:
                 raise ValueError(f"Clip {clip_id} not found in database.")
 
             clip.status = "PROCESSING"
+            if caption_style:
+                clip.caption_style = caption_style
+            if highlight_keywords is not None:
+                clip.highlight_keywords_json = json.dumps(highlight_keywords)
             await session.commit()
 
             content_res = await session.execute(select(Content).where(Content.id == clip.content_id))
@@ -390,6 +491,27 @@ class MediaService:
 
             source_meta = await self.probe_media(original_path)
             has_audio = source_meta.get("has_audio", True)
+
+            # Load transcript cues if captions requested
+            cues = []
+            active_style = caption_style or clip.caption_style or "BOLD_PUNCH"
+            active_keywords = highlight_keywords if highlight_keywords is not None else clip.highlight_keywords
+
+            if burn_captions:
+                t_res = await session.execute(select(Transcript).where(Transcript.content_id == clip.content_id))
+                transcript = t_res.scalar_one_or_none()
+                segments_data = []
+                if transcript and transcript.segments:
+                    segments_data = [
+                        {"start_time": s.start_time, "end_time": s.end_time, "text": s.text}
+                        for s in transcript.segments
+                    ]
+                cues = caption_service.generate_cues_from_segments(
+                    clip_start=clip.start_time,
+                    clip_end=clip.end_time,
+                    segments=segments_data,
+                    highlight_keywords=active_keywords
+                )
 
             temp_dir = tempfile.mkdtemp(prefix=f"reflow_clip_{clip_id}_")
             try:
@@ -421,6 +543,7 @@ class MediaService:
                     height=master_meta.get("height"),
                     duration=master_meta.get("duration") or clip.duration,
                     file_size=master_meta.get("file_size") or os.path.getsize(master_temp),
+                    has_captions=False,
                     status="READY"
                 )
                 session.add(master_variant)
@@ -447,6 +570,7 @@ class MediaService:
                         width=thumb_meta.get("width"),
                         height=thumb_meta.get("height"),
                         file_size=thumb_meta.get("file_size") or os.path.getsize(thumb_temp),
+                        has_captions=False,
                         status="READY"
                     )
                     session.add(thumb_variant)
@@ -465,6 +589,7 @@ class MediaService:
                     ratio_clean = ratio.replace(":", "x")
                     var_temp = os.path.join(temp_dir, f"{ratio_clean}.mp4")
 
+                    # Generate Clean Variant
                     await self.generate_variant(master_temp, var_temp, target_format=ratio, has_audio=has_audio)
                     var_meta = await self.validate_output(var_temp, expected_type="video")
 
@@ -485,10 +610,51 @@ class MediaService:
                         height=var_meta.get("height"),
                         duration=var_meta.get("duration") or clip.duration,
                         file_size=var_meta.get("file_size") or os.path.getsize(var_temp),
+                        has_captions=False,
                         status="READY"
                     )
                     session.add(variant)
-                    logger.info(f"Generated Clip Variant {ratio} -> {var_key}")
+                    logger.info(f"Generated Clean Clip Variant {ratio} -> {var_key}")
+
+                    # 4. Generate Captioned Variant if requested
+                    if burn_captions and cues:
+                        captioned_temp = os.path.join(temp_dir, f"captioned_{ratio_clean}.mp4")
+                        await self.burn_captions_to_video(
+                            input_video_path=var_temp,
+                            output_video_path=captioned_temp,
+                            cues=cues,
+                            width=var_meta.get("width", 1080),
+                            height=var_meta.get("height", 1920),
+                            style_name=active_style,
+                            aspect_ratio=ratio,
+                            highlight_keywords=active_keywords,
+                            has_audio=has_audio
+                        )
+                        cap_meta = await self.validate_output(captioned_temp, expected_type="video")
+
+                        cap_var_id = f"clv_cap_{ratio_clean}_{uuid.uuid4().hex[:8]}"
+                        cap_key = f"content/{clip.content_id}/clips/{clip_id}/variants/captioned_{ratio_clean}.mp4"
+
+                        with open(captioned_temp, "rb") as f:
+                            await storage_service.put(cap_key, f.read())
+
+                        cap_variant = ClipVariant(
+                            id=cap_var_id,
+                            clip_id=clip_id,
+                            variant_type=f"CAPTIONED_{var_type}",
+                            aspect_ratio=ratio,
+                            storage_key=cap_key,
+                            mime_type="video/mp4",
+                            width=cap_meta.get("width"),
+                            height=cap_meta.get("height"),
+                            duration=cap_meta.get("duration") or clip.duration,
+                            file_size=cap_meta.get("file_size") or os.path.getsize(captioned_temp),
+                            has_captions=True,
+                            caption_style=active_style,
+                            status="READY"
+                        )
+                        session.add(cap_variant)
+                        logger.info(f"Generated Captioned Clip Variant {ratio} ({active_style}) -> {cap_key}")
 
                 clip.status = "READY"
                 clip.updated_at = datetime.utcnow()
