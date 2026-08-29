@@ -16,6 +16,7 @@ from services.media_service import media_processor
 from services.storage_service import storage_service
 from services.ai_service import ai_service
 from services.carousel_renderer import carousel_renderer
+from services.publishing_service import publishing_service
 from utils.logging import get_logger
 
 logger = get_logger("MediaWorker")
@@ -171,17 +172,28 @@ async def process_single_job(payload: dict) -> bool:
                 force_refresh=f_refresh
             )
 
-        elif job_type == "CLIP_RENDER":
-            # 8. Render master clip and aspect ratio variants
+        elif job_type in ["CLIP_RENDER", "CLIP_CAPTION_RENDER"]:
+            # 8. Render master clip, aspect ratio variants, and optional burned captions
             clip_id = payload.get("clip_id")
             aspect_ratios = payload.get("aspect_ratios", ["9:16"])
             inc_thumb = payload.get("include_thumbnail", True)
+            burn_caps = payload.get("burn_captions", job_type == "CLIP_CAPTION_RENDER")
+            cap_style = payload.get("caption_style")
+            hl_words = payload.get("highlight_keywords")
 
             await media_processor.process_clip_media(
                 clip_id=clip_id,
                 aspect_ratios=aspect_ratios,
-                include_thumbnail=inc_thumb
+                include_thumbnail=inc_thumb,
+                burn_captions=burn_caps,
+                caption_style=cap_style,
+                highlight_keywords=hl_words
             )
+
+        elif job_type == "PLATFORM_PUBLISH":
+            # 9. Execute external platform video publication
+            publication_id = payload.get("publication_id")
+            await publishing_service.execute_publication_job(publication_id=publication_id)
 
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:
