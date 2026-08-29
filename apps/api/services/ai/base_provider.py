@@ -46,3 +46,34 @@ class BaseAIProvider(ABC):
         Generates platform-specific structured output (LinkedIn, Instagram, X, YouTube).
         """
         pass
+
+    @abstractmethod
+    async def plan_carousel(
+        self,
+        title: str,
+        brief: Optional[Dict[str, Any]] = None,
+        transcript_text: Optional[str] = None,
+        target_slide_count: int = 5,
+        template: str = "MINIMAL",
+        tone: str = "informative",
+        custom_instructions: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Plans a structured carousel slide deck.
+        Returns:
+            {
+                "title": str,
+                "template": str,
+                "slides": [
+                    {
+                        "position": int,
+                        "purpose": str,
+                        "layout": str,
+                        "headline": str,
+                        "body": str,
+                        "tag": str
+                    }
+                ]
+            }
+        """
+        pass

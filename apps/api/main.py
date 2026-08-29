@@ -1,5 +1,7 @@
 import sys
 import os
+import io
+import json
 import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -9,24 +11,30 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, or_
+from sqlalchemy.orm import selectinload
 from typing import Dict, Any, List, Optional
 
 from config import settings
 from database import get_db, init_db
 from models.entities import (
     Content, Asset, ContentVariant, Transcript, TranscriptSegment,
-    ContentBrief, GeneratedContent, PlatformConnection, Workflow, Job, SystemLog
+    ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
+    PlatformConnection, Workflow, Job, SystemLog
 )
 from models.schemas import (
     ContentResponse, ContentListResponse, TextContentCreateRequest,
     TranscriptResponse, ContentBriefResponse, GeneratedContentResponse,
     AIGenerateRequest, RepurposeRequest, AICarouselPrompt, SchedulePostRequest,
     PlatformConnectionSchema, PlatformConnectionUpdate, HealthResponse, ApiResponse,
-    JobResponse
+    JobResponse, CarouselResponse, CarouselListResponse, CarouselCreateRequest,
+    CarouselUpdateRequest, SlideCreateRequest, SlideUpdateRequest, SlideReorderRequest,
+    CarouselGenerateRequest, CarouselExportResponse
 )
 from services.media_service import media_processor
 from services.queue_service import queue_service
 from services.ai_service import ai_service
+from services.carousel_renderer import carousel_renderer
+from services.carousel_helper import fetch_full_carousel
 from services.health_service import health_service
 from services.storage_service import storage_service, validate_upload, generate_storage_key
 from utils.logging import get_logger
@@ -101,175 +109,223 @@ async def system_health_telemetry():
 
 @app.get("/api/overview", tags=["Overview"])
 async def get_overview(db: AsyncSession = Depends(get_db)):
-    total_res = await db.execute(select(func.count(Content.id)))
-    total_count = total_res.scalar() or 0
+    total_content_res = await db.execute(select(func.count(Content.id)))
+    total_count = total_content_res.scalar() or 0
 
-    pub_res = await db.execute(select(func.count(Content.id)).where(Content.status == "READY"))
-    published_count = pub_res.scalar() or 0
+    recent_res = await db.execute(select(Content).order_by(Content.created_at.desc()).limit(5))
+    recent_items = recent_res.scalars().all()
 
-    sched_res = await db.execute(select(func.count(Job.id)).where(Job.status == "QUEUED"))
-    scheduled_count = sched_res.scalar() or 0
+    connections_res = await db.execute(select(PlatformConnection))
+    connections = connections_res.scalars().all()
 
-    failed_res = await db.execute(select(func.count(Job.id)).where(Job.status == "FAILED"))
-    failed_count = failed_res.scalar() or 0
-
-    recent_jobs_res = await db.execute(select(Job).order_by(Job.created_at.desc()).limit(5))
-    recent_jobs = recent_jobs_res.scalars().all()
-
-    conn_res = await db.execute(select(PlatformConnection))
-    connections = conn_res.scalars().all()
+    recent_activity = [
+        {
+            "id": c.id,
+            "title": c.title,
+            "type": c.content_type,
+            "status": c.status,
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        }
+        for c in recent_items
+    ]
 
     return {
         "metrics": {
             "total": total_count,
-            "published": published_count,
-            "scheduled": scheduled_count,
-            "failed": failed_count
+            "published": 0,
+            "scheduled": 0,
+            "failed": 0
         },
-        "recent_activity": [
-            {
-                "id": j.id,
-                "title": j.type,
-                "status": j.status.lower(),
-                "created_at": j.created_at.isoformat() if j.created_at else None
-            }
-            for j in recent_jobs
-        ],
-        "connections": [
-            {
-                "id": c.id,
-                "name": c.name,
-                "handle": c.handle,
-                "connected": c.connected,
-                "capabilities": c.capabilities
-            }
-            for c in connections
-        ]
+        "recent_activity": recent_activity,
+        "connections": [PlatformConnectionSchema.model_validate(c).model_dump() for c in connections]
     }
 
 # ------------------------------------------------------------------------------
-# Content Ingestion & Media Processing Pipeline
+# Content Library API
 # ------------------------------------------------------------------------------
 
+@app.get("/api/content", response_model=ContentListResponse, tags=["Content"])
+async def list_content(
+    page: int = Query(1, ge=1),
+    limit: int = Query(12, ge=1, le=100),
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    query = select(Content)
+
+    if type and type.upper() != "ALL":
+        query = query.where(Content.content_type == type.upper())
+    if status and status.upper() != "ALL":
+        query = query.where(Content.status == status.upper())
+    if search:
+        query = query.where(Content.title.ilike(f"%{search}%"))
+
+    # Count total
+    count_query = select(func.count()).select_from(query.subquery())
+    total_count_res = await db.execute(count_query)
+    total_count = total_count_res.scalar() or 0
+
+    # Paginate
+    offset = (page - 1) * limit
+    paginated_query = query.order_by(Content.created_at.desc()).offset(offset).limit(limit)
+    res = await db.execute(paginated_query)
+    items = res.scalars().all()
+
+    return {
+        "items": [ContentResponse.model_validate(item) for item in items],
+        "total": total_count,
+        "page": page,
+        "limit": limit
+    }
+
+@app.get("/api/content/{content_id}", response_model=ContentResponse, tags=["Content"])
+async def get_content(content_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    item = res.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found.")
+    return ContentResponse.model_validate(item)
+
 @app.post("/api/content/upload", response_model=ContentResponse, tags=["Content"])
-async def upload_content(
+async def upload_content_file(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
-    filename = file.filename or "uploaded_file"
+    mime_type = file.content_type or "application/octet-stream"
     file_bytes = await file.read()
     file_size = len(file_bytes)
-    mime_type = file.content_type or "application/octet-stream"
 
-    # Multi-layer validation
-    is_valid, detected_type, error_msg = validate_upload(filename, mime_type, file_size)
-    if not is_valid or not detected_type:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+    is_valid, content_type, err_msg = validate_upload(file.filename, mime_type, file_size)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=err_msg)
 
     content_id = f"cnt_{uuid.uuid4().hex[:12]}"
     asset_id = f"ast_{uuid.uuid4().hex[:12]}"
-    content_title = title.strip() if title and title.strip() else filename
+    clean_title = title.strip() if title and title.strip() else os.path.splitext(file.filename)[0]
 
-    storage_key = generate_storage_key(content_id, asset_id, filename)
+    storage_key = generate_storage_key(content_id, asset_id, file.filename)
 
-    # 1. Write to storage
     try:
         await storage_service.put(storage_key, file_bytes)
     except Exception as e:
-        logger.error(f"Storage write failed for {filename}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to persist file to storage.")
+        logger.error(f"Failed to persist file {file.filename}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save uploaded file to storage.")
 
-    # 2. Persist Content + Asset in Database
-    try:
-        initial_status = "PROCESSING" if detected_type == "VIDEO" else "READY"
-        content = Content(
-            id=content_id,
-            title=content_title,
-            content_type=detected_type,
-            status=initial_status,
-            created_at=datetime.utcnow()
-        )
-        db.add(content)
+    # Ingest record
+    initial_status = "PROCESSING" if content_type == "VIDEO" else "READY"
+    content = Content(
+        id=content_id,
+        title=clean_title,
+        content_type=content_type,
+        status=initial_status,
+        created_at=datetime.utcnow()
+    )
+    db.add(content)
 
-        asset = Asset(
-            id=asset_id,
+    asset = Asset(
+        id=asset_id,
+        content_id=content_id,
+        original_filename=file.filename,
+        storage_key=storage_key,
+        mime_type=mime_type,
+        file_size=file_size,
+        created_at=datetime.utcnow()
+    )
+    db.add(asset)
+    await db.commit()
+    await db.refresh(content)
+
+    if content_type == "VIDEO":
+        job_id = f"job_{uuid.uuid4().hex[:12]}"
+        job = Job(
+            id=job_id,
             content_id=content_id,
-            original_filename=filename,
-            storage_key=storage_key,
-            mime_type=mime_type,
-            file_size=file_size,
+            asset_id=asset_id,
+            type="MEDIA_PROCESSING",
+            status="QUEUED",
             created_at=datetime.utcnow()
         )
-        db.add(asset)
-
-        job = None
-        if detected_type == "VIDEO":
-            job_id = f"job_{uuid.uuid4().hex[:12]}"
-            job = Job(
-                id=job_id,
-                content_id=content_id,
-                asset_id=asset_id,
-                type="MEDIA_PROCESSING",
-                status="QUEUED",
-                created_at=datetime.utcnow()
-            )
-            db.add(job)
-
+        db.add(job)
         await db.commit()
-        await db.refresh(content)
+        await queue_service.enqueue_media_job(job_id, content_id, asset_id, job_type="MEDIA_PROCESSING")
 
-        # 3. Enqueue to Background Media Worker via Redis
-        if detected_type == "VIDEO" and job:
-            await queue_service.enqueue_media_job(job.id, content_id, asset_id, job_type="MEDIA_PROCESSING")
-
-        logger.info(f"Successfully ingested {detected_type} asset '{filename}' -> Content ID: {content_id} (Status: {initial_status})")
-        return content
-
-    except Exception as e:
-        logger.error(f"Database error saving {content_id}, rolling back storage: {e}")
-        await storage_service.delete(storage_key)
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database transaction failed during content ingestion.")
+    logger.info(f"Successfully ingested {content_type} asset '{file.filename}' -> Content ID: {content_id} (Status: {initial_status})")
+    return ContentResponse.model_validate(content)
 
 @app.post("/api/content/text", response_model=ContentResponse, tags=["Content"])
-async def create_text_content(
-    req: TextContentCreateRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def create_text_content(payload: TextContentCreateRequest, db: AsyncSession = Depends(get_db)):
     content_id = f"cnt_{uuid.uuid4().hex[:12]}"
     content = Content(
         id=content_id,
-        title=req.title,
+        title=payload.title.strip(),
         content_type="TEXT",
         status="READY",
-        text_content=req.text,
+        text_content=payload.text.strip(),
         created_at=datetime.utcnow()
     )
     db.add(content)
     await db.commit()
     await db.refresh(content)
-    logger.info(f"Created text content asset: {content.id} ({content.title})")
-    return content
+    logger.info(f"Created text content asset: {content_id} ({payload.title})")
+    return ContentResponse.model_validate(content)
 
-@app.post("/api/content/{content_id}/reprocess", response_model=ApiResponse, tags=["Content"])
-async def reprocess_content_media(content_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Content).where(Content.id == content_id))
-    content = result.scalar_one_or_none()
-    if not content or content.content_type != "VIDEO":
-        raise HTTPException(status_code=404, detail="Video content item not found.")
+@app.get("/api/content/{content_id}/asset/{asset_id}", tags=["Content"])
+async def stream_asset(content_id: str, asset_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Asset).where(Asset.id == asset_id, Asset.content_id == content_id)
+    )
+    asset = res.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found.")
 
-    if not content.assets:
-        raise HTTPException(status_code=400, detail="Content has no associated media assets.")
+    real_path = storage_service.get_real_path(asset.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail="Asset physical file missing.")
 
-    asset_id = content.assets[0].id
+    return FileResponse(
+        real_path,
+        media_type=asset.mime_type,
+        filename=asset.original_filename
+    )
+
+@app.get("/api/content/{content_id}/variant/{variant_id}", tags=["Content"])
+async def stream_variant(content_id: str, variant_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ContentVariant).where(ContentVariant.id == variant_id, ContentVariant.content_id == content_id)
+    )
+    variant = res.scalar_one_or_none()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Variant not found.")
+
+    real_path = storage_service.get_real_path(variant.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail="Variant physical file missing.")
+
+    return FileResponse(
+        real_path,
+        media_type=variant.mime_type
+    )
+
+@app.post("/api/content/{content_id}/reprocess", tags=["Content"])
+async def reprocess_media_content(content_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    content = res.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found.")
+    if content.content_type != "VIDEO" or not content.assets:
+        raise HTTPException(status_code=400, detail="Only video content with assets can be reprocessed.")
+
+    primary_asset = content.assets[0]
     content.status = "PROCESSING"
 
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     job = Job(
         id=job_id,
         content_id=content_id,
-        asset_id=asset_id,
+        asset_id=primary_asset.id,
         type="MEDIA_PROCESSING",
         status="QUEUED",
         created_at=datetime.utcnow()
@@ -277,181 +333,71 @@ async def reprocess_content_media(content_id: str, db: AsyncSession = Depends(ge
     db.add(job)
     await db.commit()
 
-    await queue_service.enqueue_media_job(job_id, content_id, asset_id, job_type="MEDIA_PROCESSING")
-    return ApiResponse(status="success", message=f"Media reprocessing queued for Content {content_id}.")
+    await queue_service.enqueue_media_job(job_id, content_id, primary_asset.id, job_type="MEDIA_PROCESSING")
+    return {"status": "success", "message": f"Reprocessing queued for content {content_id} (Job ID: {job_id})"}
 
-@app.get("/api/content", response_model=ContentListResponse, tags=["Content"])
-async def list_content(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    type: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db)
-):
-    stmt = select(Content)
-    count_stmt = select(func.count(Content.id))
-
-    if type and type.upper() != "ALL":
-        stmt = stmt.where(Content.content_type == type.upper())
-        count_stmt = count_stmt.where(Content.content_type == type.upper())
-
-    if status:
-        stmt = stmt.where(Content.status == status.upper())
-        count_stmt = count_stmt.where(Content.status == status.upper())
-
-    if search:
-        search_filter = or_(
-            Content.title.ilike(f"%{search}%"),
-            Content.text_content.ilike(f"%{search}%")
-        )
-        stmt = stmt.where(search_filter)
-        count_stmt = count_stmt.where(search_filter)
-
-    total_res = await db.execute(count_stmt)
-    total_count = total_res.scalar() or 0
-
-    offset = (page - 1) * limit
-    stmt = stmt.order_by(Content.created_at.desc()).offset(offset).limit(limit)
-    result = await db.execute(stmt)
-    items = result.scalars().all()
-
-    return ContentListResponse(
-        items=items,
-        total=total_count,
-        page=page,
-        limit=limit
-    )
-
-@app.get("/api/content/{content_id}", response_model=ContentResponse, tags=["Content"])
-async def get_content(content_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Content).where(Content.id == content_id))
-    content = result.scalar_one_or_none()
-    if not content:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content asset not found.")
-    return content
-
-@app.get("/api/content/{content_id}/asset/{asset_id}", tags=["Content"])
-async def stream_asset(content_id: str, asset_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Asset).where(Asset.id == asset_id, Asset.content_id == content_id))
-    asset = result.scalar_one_or_none()
-    if not asset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset file not found.")
-
-    real_path = storage_service.get_real_path(asset.storage_key)
-    if not os.path.exists(real_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Storage file missing from disk.")
-
-    return FileResponse(
-        path=real_path,
-        media_type=asset.mime_type,
-        filename=asset.original_filename
-    )
-
-@app.get("/api/content/{content_id}/variant/{variant_id}", tags=["Content"])
-async def stream_variant(content_id: str, variant_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(ContentVariant).where(ContentVariant.id == variant_id, ContentVariant.content_id == content_id))
-    variant = result.scalar_one_or_none()
-    if not variant:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant file not found.")
-
-    real_path = storage_service.get_real_path(variant.storage_key)
-    if not os.path.exists(real_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant file missing from disk.")
-
-    return FileResponse(
-        path=real_path,
-        media_type=variant.mime_type,
-        filename=os.path.basename(variant.storage_key)
-    )
-
-@app.delete("/api/content/{content_id}", response_model=ApiResponse, tags=["Content"])
+@app.delete("/api/content/{content_id}", tags=["Content"])
 async def delete_content(content_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Content).where(Content.id == content_id))
-    content = result.scalar_one_or_none()
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    content = res.scalar_one_or_none()
     if not content:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content asset not found.")
+        raise HTTPException(status_code=404, detail="Content not found.")
 
+    # Clean storage
     for asset in content.assets:
-        try:
-            await storage_service.delete(asset.storage_key)
-        except Exception:
-            pass
+        try: await storage_service.delete(asset.storage_key)
+        except Exception: pass
 
     for variant in content.variants:
-        try:
-            await storage_service.delete(variant.storage_key)
-        except Exception:
-            pass
+        try: await storage_service.delete(variant.storage_key)
+        except Exception: pass
+
+    for carousel in content.carousels:
+        for export in carousel.exports:
+            try: await storage_service.delete(export.storage_key)
+            except Exception: pass
 
     await db.delete(content)
     await db.commit()
     logger.info(f"Deleted Content {content_id} and all related physical storage variants & AI outputs.")
-    return ApiResponse(status="success", message=f"Content {content_id} and all related variants deleted.")
+    return {"status": "success", "message": f"Content {content_id} deleted successfully."}
 
 # ------------------------------------------------------------------------------
-# Phase 3 AI Content Intelligence Endpoints
+# Phase 3 AI Content Intelligence API
 # ------------------------------------------------------------------------------
 
 @app.get("/api/content/{content_id}/transcript", response_model=TranscriptResponse, tags=["AI Intelligence"])
-async def get_transcript(content_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Transcript).where(Transcript.content_id == content_id))
-    transcript = result.scalars().first()
+async def get_content_transcript(content_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Transcript).where(Transcript.content_id == content_id))
+    transcript = res.scalar_one_or_none()
     if not transcript:
         raise HTTPException(status_code=404, detail="Transcript not found for this content.")
-    return transcript
+    return TranscriptResponse.model_validate(transcript)
 
 @app.get("/api/content/{content_id}/brief", response_model=ContentBriefResponse, tags=["AI Intelligence"])
 async def get_content_brief(content_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(ContentBrief).where(ContentBrief.content_id == content_id))
-    brief = result.scalars().first()
+    res = await db.execute(select(ContentBrief).where(ContentBrief.content_id == content_id))
+    brief = res.scalar_one_or_none()
     if not brief:
         raise HTTPException(status_code=404, detail="ContentBrief not found for this content.")
-    return ContentBriefResponse(
-        id=brief.id,
-        content_id=brief.content_id,
-        transcript_id=brief.transcript_id,
-        title=brief.title,
-        summary=brief.summary,
-        topics=brief.topics,
-        keywords=brief.keywords,
-        audience=brief.audience,
-        tone=brief.tone,
-        key_points=brief.key_points,
-        hooks=brief.hooks,
-        quotes=brief.quotes,
-        cta_suggestions=brief.cta_suggestions,
-        provider=brief.provider,
-        model=brief.model,
-        prompt_version=brief.prompt_version,
-        created_at=brief.created_at
-    )
+    return ContentBriefResponse.model_validate(brief)
 
 @app.get("/api/content/{content_id}/generated", response_model=List[GeneratedContentResponse], tags=["AI Intelligence"])
-async def get_generated_content(content_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
+async def get_generated_content_list(content_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
         select(GeneratedContent)
         .where(GeneratedContent.content_id == content_id)
-        .order_by(GeneratedContent.platform.asc(), GeneratedContent.version.desc())
+        .order_by(GeneratedContent.platform, GeneratedContent.version.desc())
     )
-    items = result.scalars().all()
-    return [
-        GeneratedContentResponse(
-            id=g.id,
-            content_id=g.content_id,
-            brief_id=g.brief_id,
-            platform=g.platform,
-            generation_type=g.generation_type,
-            status=g.status,
-            payload=g.payload,
-            provider=g.provider,
-            model=g.model,
-            prompt_version=g.prompt_version,
-            version=g.version,
-            created_at=g.created_at
-        )
-        for g in items
-    ]
+    items = res.scalars().all()
+    # Deduplicate to show latest version of each platform
+    seen = set()
+    latest_items = []
+    for it in items:
+        if it.platform not in seen:
+            seen.add(it.platform)
+            latest_items.append(it)
+    return [GeneratedContentResponse.model_validate(it) for it in latest_items]
 
 @app.post("/api/content/{content_id}/generate", response_model=ApiResponse, tags=["AI Intelligence"])
 async def trigger_ai_generation(
@@ -459,39 +405,39 @@ async def trigger_ai_generation(
     req: AIGenerateRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Content).where(Content.id == content_id))
-    content = result.scalar_one_or_none()
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    content = res.scalar_one_or_none()
     if not content:
-        raise HTTPException(status_code=404, detail="Content asset not found.")
+        raise HTTPException(status_code=404, detail="Content not found.")
 
-    asset_id = content.assets[0].id if content.assets else "text_asset"
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    job = Job(
-        id=job_id,
-        content_id=content_id,
-        asset_id=asset_id,
-        type="CONTENT_GENERATION",
-        status="QUEUED",
-        created_at=datetime.utcnow()
-    )
-    db.add(job)
-    await db.commit()
-
-    await queue_service.enqueue_media_job(job_id, content_id, asset_id, job_type="CONTENT_GENERATION")
-    return ApiResponse(status="success", message=f"AI generation job {job_id} queued for {req.platforms}.")
+    try:
+        await ai_service.generate_platform_content(
+            content_id=content_id,
+            platforms=req.platforms,
+            tone=req.tone or "professional",
+            custom_instructions=req.custom_instructions
+        )
+        return ApiResponse(status="success", message="AI generation executed successfully.")
+    except Exception as e:
+        logger.error(f"AI generation failed for Content {content_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @app.post("/api/content/{content_id}/regenerate/{platform}", response_model=ApiResponse, tags=["AI Intelligence"])
 async def regenerate_single_platform(
     content_id: str,
     platform: str,
-    tone: Optional[str] = "professional",
+    tone: Optional[str] = Query("professional"),
     db: AsyncSession = Depends(get_db)
 ):
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    content = res.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found.")
+
     plt_upper = platform.upper()
     if plt_upper not in ["LINKEDIN", "INSTAGRAM", "X", "YOUTUBE"]:
         raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
-    # Generate immediately in async handler or via queue
     try:
         await ai_service.generate_platform_content(
             content_id=content_id,
@@ -502,6 +448,297 @@ async def regenerate_single_platform(
     except Exception as e:
         logger.error(f"Regeneration failed for {plt_upper}: {e}")
         raise HTTPException(status_code=500, detail=f"Regeneration failed: {str(e)}")
+
+# ------------------------------------------------------------------------------
+# Phase 4 Carousel Engine API
+# ------------------------------------------------------------------------------
+
+@app.post("/api/carousels", response_model=CarouselResponse, tags=["Carousels"])
+async def create_carousel(req: CarouselCreateRequest, db: AsyncSession = Depends(get_db)):
+    carousel_id = f"car_{uuid.uuid4().hex[:12]}"
+    carousel = Carousel(
+        id=carousel_id,
+        content_id=req.content_id,
+        title=req.title.strip(),
+        template=req.template.upper() if req.template else "MINIMAL",
+        aspect_ratio=req.aspect_ratio or "1:1",
+        status="DRAFT",
+        slide_count=0,
+        version=1,
+        created_at=datetime.utcnow()
+    )
+    db.add(carousel)
+    await db.commit()
+    
+    full_carousel = await fetch_full_carousel(db, carousel_id)
+    logger.info(f"Created Carousel {carousel_id} ('{carousel.title}')")
+    return CarouselResponse.model_validate(full_carousel)
+
+@app.get("/api/carousels", response_model=CarouselListResponse, tags=["Carousels"])
+async def list_carousels(
+    page: int = Query(1, ge=1),
+    limit: int = Query(12, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    query = (
+        select(Carousel)
+        .options(
+            selectinload(Carousel.slides).selectinload(CarouselSlide.elements),
+            selectinload(Carousel.exports)
+        )
+        .order_by(Carousel.updated_at.desc())
+    )
+    count_res = await db.execute(select(func.count(Carousel.id)))
+    total = count_res.scalar() or 0
+
+    offset = (page - 1) * limit
+    res = await db.execute(query.offset(offset).limit(limit))
+    items = res.scalars().all()
+
+    return {
+        "items": [CarouselResponse.model_validate(c) for c in items],
+        "total": total,
+        "page": page,
+        "limit": limit
+    }
+
+@app.get("/api/carousels/{carousel_id}", response_model=CarouselResponse, tags=["Carousels"])
+async def get_carousel(carousel_id: str, db: AsyncSession = Depends(get_db)):
+    carousel = await fetch_full_carousel(db, carousel_id)
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+    return CarouselResponse.model_validate(carousel)
+
+@app.put("/api/carousels/{carousel_id}", response_model=CarouselResponse, tags=["Carousels"])
+async def update_carousel(carousel_id: str, req: CarouselUpdateRequest, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    if req.title is not None:
+        carousel.title = req.title.strip()
+    if req.template is not None:
+        carousel.template = req.template.upper()
+    if req.aspect_ratio is not None:
+        carousel.aspect_ratio = req.aspect_ratio
+
+    carousel.version += 1
+    carousel.updated_at = datetime.utcnow()
+    await db.commit()
+
+    full_carousel = await fetch_full_carousel(db, carousel_id)
+    return CarouselResponse.model_validate(full_carousel)
+
+@app.delete("/api/carousels/{carousel_id}", tags=["Carousels"])
+async def delete_carousel(carousel_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    for export in carousel.exports:
+        try: await storage_service.delete(export.storage_key)
+        except Exception: pass
+
+    await db.delete(carousel)
+    await db.commit()
+    return {"status": "success", "message": f"Carousel {carousel_id} deleted."}
+
+@app.post("/api/carousels/{carousel_id}/generate", response_model=ApiResponse, tags=["Carousels"])
+async def generate_carousel(
+    carousel_id: str,
+    req: CarouselGenerateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    carousel.status = "GENERATING"
+    await db.commit()
+
+    # Enqueue background job
+    job_id = f"job_car_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        content_id=carousel.content_id,
+        type="CAROUSEL_GENERATION",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        content_id=carousel.content_id,
+        asset_id=None,
+        job_type="CAROUSEL_GENERATION",
+        carousel_id=carousel_id,
+        slide_count=req.slide_count,
+        template=req.template,
+        tone=req.tone,
+        custom_prompt=req.custom_prompt
+    )
+
+    return ApiResponse(status="success", message=f"Carousel generation queued (Job {job_id}).")
+
+@app.post("/api/carousels/{carousel_id}/slides", response_model=CarouselResponse, tags=["Carousels"])
+async def add_carousel_slide(carousel_id: str, req: SlideCreateRequest, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    pos = req.position if req.position is not None else (carousel.slide_count + 1)
+    slide_id = f"sld_{uuid.uuid4().hex[:12]}"
+    slide = CarouselSlide(
+        id=slide_id,
+        carousel_id=carousel_id,
+        position=pos,
+        purpose=req.purpose,
+        layout=req.layout,
+        headline=req.headline.strip(),
+        body=req.body.strip(),
+        tag=req.tag or "TIP",
+        background=req.background or "#0F172A",
+        created_at=datetime.utcnow()
+    )
+    db.add(slide)
+
+    elem = SlideElement(
+        id=f"elm_{uuid.uuid4().hex[:12]}",
+        slide_id=slide_id,
+        type="TEXT",
+        content=f"{req.headline}\n\n{req.body}",
+        style_json=json.dumps({"fontSize": 32, "color": "#FFFFFF"})
+    )
+    db.add(elem)
+
+    carousel.slide_count += 1
+    carousel.version += 1
+    carousel.updated_at = datetime.utcnow()
+    await db.commit()
+
+    full_carousel = await fetch_full_carousel(db, carousel_id)
+    return CarouselResponse.model_validate(full_carousel)
+
+@app.put("/api/carousels/{carousel_id}/slides/reorder", response_model=CarouselResponse, tags=["Carousels"])
+async def reorder_carousel_slides(
+    carousel_id: str,
+    req: SlideReorderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    s_res = await db.execute(select(CarouselSlide).where(CarouselSlide.carousel_id == carousel_id))
+    slides_map = {s.id: s for s in s_res.scalars().all()}
+
+    for new_pos, sid in enumerate(req.slide_ids, start=1):
+        if sid in slides_map:
+            slides_map[sid].position = new_pos
+
+    carousel.version += 1
+    carousel.updated_at = datetime.utcnow()
+    await db.commit()
+
+    full_carousel = await fetch_full_carousel(db, carousel_id)
+    return CarouselResponse.model_validate(full_carousel)
+
+@app.put("/api/carousels/{carousel_id}/slides/{slide_id}", response_model=CarouselResponse, tags=["Carousels"])
+async def update_carousel_slide(
+    carousel_id: str,
+    slide_id: str,
+    req: SlideUpdateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    s_res = await db.execute(
+        select(CarouselSlide).where(CarouselSlide.id == slide_id, CarouselSlide.carousel_id == carousel_id)
+    )
+    slide = s_res.scalar_one_or_none()
+    if not slide:
+        raise HTTPException(status_code=404, detail="Slide not found.")
+
+    if req.headline is not None:
+        slide.headline = req.headline.strip()
+    if req.body is not None:
+        slide.body = req.body.strip()
+    if req.tag is not None:
+        slide.tag = req.tag.strip()
+    if req.purpose is not None:
+        slide.purpose = req.purpose
+    if req.layout is not None:
+        slide.layout = req.layout
+    if req.background is not None:
+        slide.background = req.background
+
+    slide.updated_at = datetime.utcnow()
+    carousel.version += 1
+    carousel.updated_at = datetime.utcnow()
+    await db.commit()
+
+    full_carousel = await fetch_full_carousel(db, carousel_id)
+    return CarouselResponse.model_validate(full_carousel)
+
+    carousel.version += 1
+    carousel.updated_at = datetime.utcnow()
+    await db.commit()
+
+    full_carousel = await fetch_full_carousel(db, carousel_id)
+    return CarouselResponse.model_validate(full_carousel)
+
+@app.post("/api/carousels/{carousel_id}/render", tags=["Carousels"])
+async def render_carousel_exports(carousel_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Carousel).where(Carousel.id == carousel_id))
+    carousel = res.scalar_one_or_none()
+    if not carousel:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+
+    try:
+        render_result = await carousel_renderer.render_carousel_deck(carousel_id)
+        return {"status": "success", "message": "Render completed.", "data": render_result}
+    except Exception as e:
+        logger.error(f"Render failed for Carousel {carousel_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Render failed: {str(e)}")
+
+@app.get("/api/carousels/{carousel_id}/export/{export_id}", tags=["Carousels"])
+async def stream_carousel_export(carousel_id: str, export_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(CarouselExport).where(CarouselExport.id == export_id, CarouselExport.carousel_id == carousel_id)
+    )
+    export = res.scalar_one_or_none()
+    if not export:
+        raise HTTPException(status_code=404, detail="Export not found.")
+
+    real_path = storage_service.get_real_path(export.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail="Export physical file missing.")
+
+    media_type = "application/pdf" if export.format == "PDF" else "image/png"
+    filename = f"carousel_{carousel_id}.pdf" if export.format == "PDF" else f"slide_{carousel_id}.png"
+    return FileResponse(real_path, media_type=media_type, filename=filename)
+
+# Legacy / Adapter endpoint
+@app.post("/api/carousels/generate", tags=["Carousel"])
+async def generate_carousel_deck_legacy(prompt: AICarouselPrompt):
+    topic = prompt.topic.strip() or "Automate Your Content Engine"
+    slides = [
+        {"id": "g1", "title": topic, "subtitle": "01 / 04", "body": "The definitive blueprint for high-impact creators.", "tag": "OVERVIEW"},
+        {"id": "g2", "title": "The Repetitive Bottleneck", "subtitle": "02 / 04", "body": "Creators waste over 15 hours weekly manually formatting cross-platform content.", "tag": "PROBLEM"},
+        {"id": "g3", "title": "The Unified Pipeline", "subtitle": "03 / 04", "body": "Feed one canonical asset into Reflow to generate native formats everywhere.", "tag": "SOLUTION"},
+        {"id": "g4", "title": "Start Automating", "subtitle": "04 / 04", "body": "Deploy locally with Docker and own your data and distribution end-to-end.", "tag": "ACTION"}
+    ]
+    return {"slides": slides}
 
 # Legacy repurpose endpoint adapter for backward compatibility
 @app.post("/api/repurpose/generate", tags=["Repurpose"])
@@ -526,21 +763,6 @@ async def generate_repurpose(req: RepurposeRequest, db: AsyncSession = Depends(g
         "target_format": req.target_format,
         "outputs": outputs
     }
-
-# ------------------------------------------------------------------------------
-# Carousel Studio (Phase 4)
-# ------------------------------------------------------------------------------
-
-@app.post("/api/carousels/generate", tags=["Carousel"])
-async def generate_carousel_deck(prompt: AICarouselPrompt):
-    topic = prompt.topic.strip() or "Automate Your Content Engine"
-    slides = [
-        {"id": "g1", "title": topic, "subtitle": "01 / 04", "body": "The definitive blueprint for high-impact creators.", "tag": "OVERVIEW"},
-        {"id": "g2", "title": "The Repetitive Bottleneck", "subtitle": "02 / 04", "body": "Creators waste over 15 hours weekly manually formatting cross-platform content.", "tag": "PROBLEM"},
-        {"id": "g3", "title": "The Unified Pipeline", "subtitle": "03 / 04", "body": "Feed one canonical asset into Reflow to generate native formats everywhere.", "tag": "SOLUTION"},
-        {"id": "g4", "title": "Start Automating", "subtitle": "04 / 04", "body": "Deploy locally with Docker and own your data and distribution end-to-end.", "tag": "ACTION"}
-    ]
-    return {"slides": slides}
 
 # ------------------------------------------------------------------------------
 # Platform Connections & Publishing (Phase 5)

@@ -10,11 +10,12 @@ sys.path.append(os.path.dirname(__file__))
 
 from config import settings
 from database import async_session_factory, init_db
-from models.entities import Job, Content, Asset, Transcript, ContentBrief, GeneratedContent
+from models.entities import Job, Content, Asset, Transcript, ContentBrief, GeneratedContent, Carousel
 from services.queue_service import queue_service
 from services.media_service import media_processor
 from services.storage_service import storage_service
 from services.ai_service import ai_service
+from services.carousel_renderer import carousel_renderer
 from utils.logging import get_logger
 
 logger = get_logger("MediaWorker")
@@ -24,23 +25,26 @@ async def process_single_job(payload: dict) -> bool:
     job_id = payload.get("job_id")
     content_id = payload.get("content_id")
     asset_id = payload.get("asset_id")
+    carousel_id = payload.get("carousel_id")
     job_type = payload.get("job_type", "MEDIA_PROCESSING")
 
-    logger.info(f"Processing job {job_id} (Type: {job_type}) for Content: {content_id}")
+    logger.info(f"Processing job {job_id} (Type: {job_type}) for Content: {content_id or carousel_id}")
 
     async with async_session_factory() as session:
         job_res = await session.execute(select(Job).where(Job.id == job_id))
         job = job_res.scalar_one_or_none()
 
-        content_res = await session.execute(select(Content).where(Content.id == content_id))
-        content = content_res.scalar_one_or_none()
+        if not job:
+            logger.warn(f"Job {job_id} not found in database, cancelling.")
+            return False
 
-        if not job or not content:
-            logger.warn(f"Job {job_id} or Content {content_id} not found in database, cancelling.")
-            if job:
+        if content_id and not carousel_id:
+            content_res = await session.execute(select(Content).where(Content.id == content_id))
+            if not content_res.scalar_one_or_none():
+                logger.warn(f"Content {content_id} not found in database, cancelling.")
                 job.status = "CANCELLED"
                 await session.commit()
-            return False
+                return False
 
         # Mark RUNNING
         job.status = "RUNNING"
@@ -130,6 +134,27 @@ async def process_single_job(payload: dict) -> bool:
                 platforms=["LINKEDIN", "INSTAGRAM", "X", "YOUTUBE"]
             )
 
+        elif job_type == "CAROUSEL_GENERATION":
+            # 5. Plan and render AI carousel deck
+            slide_count = payload.get("slide_count", 5)
+            template = payload.get("template", "MINIMAL")
+            tone = payload.get("tone", "informative")
+            custom_prompt = payload.get("custom_prompt")
+
+            await ai_service.plan_and_persist_carousel(
+                carousel_id=carousel_id,
+                content_id=content_id,
+                target_slide_count=slide_count,
+                template=template,
+                tone=tone,
+                custom_instructions=custom_prompt
+            )
+            await carousel_renderer.render_carousel_deck(carousel_id)
+
+        elif job_type == "CAROUSEL_RENDER":
+            # 6. Render carousel PNGs and PDF
+            await carousel_renderer.render_carousel_deck(carousel_id)
+
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:
             job_res = await session.execute(select(Job).where(Job.id == job_id))
@@ -154,8 +179,16 @@ async def process_single_job(payload: dict) -> bool:
             job_res = await session.execute(select(Job).where(Job.id == job_id))
             job = job_res.scalar_one_or_none()
 
-            content_res = await session.execute(select(Content).where(Content.id == content_id))
-            content = content_res.scalar_one_or_none()
+            content_res = None
+            if content_id:
+                content_res_obj = await session.execute(select(Content).where(Content.id == content_id))
+                content_res = content_res_obj.scalar_one_or_none()
+
+            if carousel_id and not content_id:
+                c_obj = await session.execute(select(Carousel).where(Carousel.id == carousel_id))
+                c_item = c_obj.scalar_one_or_none()
+                if c_item:
+                    c_item.status = "FAILED"
 
             if job:
                 if not is_permanent and job.attempts < job.max_attempts:
@@ -169,8 +202,8 @@ async def process_single_job(payload: dict) -> bool:
                     job.status = "FAILED"
                     job.completed_at = datetime.utcnow()
                     job.error = f"Permanent failure: {err_msg}"
-                    if content and job_type == "MEDIA_PROCESSING":
-                        content.status = "FAILED"
+                    if content_res and job_type == "MEDIA_PROCESSING":
+                        content_res.status = "FAILED"
                     await session.commit()
         return False
 

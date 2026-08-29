@@ -12,6 +12,7 @@
 
 ### 🌟 Core Philosophy
 - **Self-Hosting First**: Your content, credentials, and database remain 100% on your own infrastructure.
+- **Carousel & Content Creation Engine**: Structured multi-slide carousel creation, AI planning from source content or `ContentBrief`, 4 deterministic design templates, server-side 1080x1080 PNG rasterization, and multi-page PDF export.
 - **AI Content Intelligence**: Provider-independent AI engine (OpenAI & Gemini) with audio extraction, timestamped transcription, reusable `ContentBrief` synthesis, and platform-native generation.
 - **Asynchronous Media Engine**: Redis-backed background worker generates real aspect ratio variants (`16:9`, `9:16`, `1:1`, `4:5`) and thumbnails using FFmpeg/FFprobe.
 - **Real Content Pipeline**: Multi-layer validated ingestion, collision-free storage, and transactional persistence.
@@ -23,12 +24,13 @@
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
+| **Carousel & Content Creation** | ✅ Implemented (Phase 4) | Relational `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport` tables, AI planner, design templates (`MINIMAL`, `EDITORIAL`, `BOLD`, `EDUCATIONAL`), 1080x1080 PNG & multi-page PDF renderer, slide reordering, versioning, and Carousel Studio UI. |
 | **AI Content Intelligence** | ✅ Implemented (Phase 3) | Audio extraction, timestamped transcription, `ContentBrief` extraction, platform-specific copies (LinkedIn, Instagram, X threads, YouTube chapters), prompt versioning, and validation. |
 | **Real Media Engine** | ✅ Implemented (Phase 2) | Asynchronous Redis worker, real FFprobe metadata extraction, FFmpeg variant generation (9:16, 1:1, 4:5, 16:9, Thumbnail), atomic persistence, and streaming. |
 | **Real Content Ingestion** | ✅ Implemented (Phase 1) | Real multipart upload for Video (`.mp4`, `.mov`, `.webm`, `.mkv`), Image (`.png`, `.jpg`, `.webp`), PDF (`.pdf`), and Text (`.txt`, `.md`, inline notes). |
 | **Storage & Persistence** | ✅ Implemented (Phase 1) | `BaseStorageService` / `LocalStorageService` with path traversal defense, collision-safe keys (`content/{id}/original/{asset_id}.ext`), and orphan rollback. |
-| **Content Library & Previews** | ✅ Implemented (Phase 1, 2, 3) | Real Content 1 $\rightarrow$ N Asset $\rightarrow$ N Variant $\rightarrow$ N AI Outputs, live processing polling, and Repurpose Studio. |
-| **Database & Models** | ✅ Implemented (Phase 0, 1, 2, 3) | SQLAlchemy async engine (SQLite dev / PostgreSQL prod), `Transcript`, `ContentBrief`, and `GeneratedContent` tables. |
+| **Content Library & Previews** | ✅ Implemented (Phase 1–4) | Real Content 1 $\rightarrow$ N Asset $\rightarrow$ N Variant $\rightarrow$ N AI Outputs $\rightarrow$ N Carousels, live processing polling, and Repurpose Studio. |
+| **Database & Models** | ✅ Implemented (Phase 0–4) | SQLAlchemy async engine (SQLite dev / PostgreSQL prod), relational tables with foreign-key cascade deletion. |
 | **Health Telemetry** | ✅ Implemented (Phase 0) | Active component checks for Database, Storage, FFmpeg, and AI keys. |
 | **Publishing Connectors** | 🟡 Prototype / Mock (Phase 5) | Standard connector architecture with explicit `not_implemented` status responses. |
 | **Workflow Engine** | 🟡 Visual Prototype (Phase 6) | Interactive node graph simulator; DAG execution engine scheduled for Phase 6. |
@@ -38,38 +40,42 @@
 ## 🏗️ Architecture
 
 ```
-                         REFLOW
-                            │
-                   ┌────────┴────────┐
-                   │                 │
-                CONTENT             AI
-                   │                 │
-                Original             │
-                   │                 │
-                FFprobe              │
-                   │                 │
-                FFmpeg               │
-                   │                 │
-             ┌─────┴─────┐           │
-             │           │           │
-          Variants     Audio         │
-                         │           │
-                         ▼           │
-                    Transcript ──────┤
-                         │           │
-                         ▼           │
-                   ContentBrief ─────┤
-                         │           │
-              ┌──────────┼───────────┤
-              ▼          ▼           ▼
-          LinkedIn   Instagram       X
-              │          │           │
-              └──────────┼───────────┘
-                         │
-                      YouTube
-                         │
-                         ▼
-                 REPURPOSE STUDIO
+                                 REFLOW
+                                   │
+              ┌────────────────────┼────────────────────┐
+              │                    │                    │
+           CONTENT                 AI                CAROUSEL
+              │                    │                    │
+           Original                │                    │
+              │                    │                    │
+           FFprobe                 │                    │
+              │                    │                    │
+           FFmpeg                  │                    │
+              │                    │                    │
+        ┌─────┴─────┐              │                    │
+        │           │              │                    │
+     Variants     Audio            │                    │
+                    │              │                    │
+                    ▼              │                    │
+               Transcript ─────────┤                    │
+                    │              │                    │
+                    ▼              │                    │
+              ContentBrief ────────┼────────────────────┤
+                    │              │                    │
+         ┌──────────┼───────────┐  │                    ▼
+         ▼          ▼           ▼  │             Carousel Planner
+     LinkedIn   Instagram       X  │                    │
+         │          │           │  │                    ▼
+         └──────────┼───────────┘  │             Structured Slides
+                    │              │                    │
+                 YouTube           │                    ▼
+                    │              │              Design System
+                    ▼              ▼                    │
+            REPURPOSE STUDIO  AI SERVICE                ▼
+                                                     Renderer
+                                                        │
+                                                        ▼
+                                                  PNG / PDF EXPORTS
 ```
 
 ---
@@ -129,10 +135,11 @@ python worker.py
 ## 🧪 Testing
 
 ```bash
-# Run all backend tests (API pipeline, media engine, AI engine, persistence)
+# Run all backend tests (API pipeline, media engine, AI engine, carousel engine, persistence)
 apps/api/venv/bin/python3 apps/api/test_api.py
 apps/api/venv/bin/python3 apps/api/test_media_engine.py
 apps/api/venv/bin/python3 apps/api/test_ai_engine.py
+apps/api/venv/bin/python3 apps/api/test_carousel_engine.py
 apps/api/venv/bin/python3 apps/api/test_persistence.py
 
 # Run frontend build verification

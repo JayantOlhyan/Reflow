@@ -2,45 +2,49 @@
 
 **"Create once. Transform everywhere."**
 
-Reflow is an open-source, self-hosted content operating system for creators and developers. This document describes the system architecture established through Phase 3.
+Reflow is an open-source, self-hosted content operating system for creators and developers. This document describes the system architecture established through Phase 4.
 
 ---
 
 ## 1. High-Level Architecture Diagram
 
 ```
-                         REFLOW
-                            │
-                   ┌────────┴────────┐
-                   │                 │
-                CONTENT             AI
-                   │                 │
-                Original             │
-                   │                 │
-                FFprobe              │
-                   │                 │
-                FFmpeg               │
-                   │                 │
-             ┌─────┴─────┐           │
-             │           │           │
-          Variants     Audio         │
-                         │           │
-                         ▼           │
-                    Transcript ──────┤
-                         │           │
-                         ▼           │
-                   ContentBrief ─────┤
-                         │           │
-              ┌──────────┼───────────┤
-              ▼          ▼           ▼
-          LinkedIn   Instagram       X
-              │          │           │
-              └──────────┼───────────┘
-                         │
-                      YouTube
-                         │
-                         ▼
-                 REPURPOSE STUDIO
+                                 REFLOW
+                                   │
+              ┌────────────────────┼────────────────────┐
+              │                    │                    │
+           CONTENT                 AI                CAROUSEL
+              │                    │                    │
+           Original                │                    │
+              │                    │                    │
+           FFprobe                 │                    │
+              │                    │                    │
+           FFmpeg                  │                    │
+              │                    │                    │
+        ┌─────┴─────┐              │                    │
+        │           │              │                    │
+     Variants     Audio            │                    │
+                    │              │                    │
+                    ▼              │                    │
+               Transcript ─────────┤                    │
+                    │              │                    │
+                    ▼              │                    │
+              ContentBrief ────────┼────────────────────┤
+                    │              │                    │
+         ┌──────────┼───────────┐  │                    ▼
+         ▼          ▼           ▼  │             Carousel Planner
+     LinkedIn   Instagram       X  │                    │
+         │          │           │  │                    ▼
+         └──────────┼───────────┘  │             Structured Slides
+                    │              │                    │
+                 YouTube           │                    ▼
+                    │              │              Design System
+                    ▼              ▼                    │
+            REPURPOSE STUDIO  AI SERVICE                ▼
+                                                     Renderer
+                                                        │
+                                                        ▼
+                                                  PNG / PDF EXPORTS
 ```
 
 ---
@@ -50,32 +54,27 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 ### 2.1 Frontend (`apps/web`)
 - **Framework**: Next.js 16 (App Router), React 19, TypeScript.
 - **Styling & UI**: Tailwind CSS v4, custom dark theme aesthetic (`#0B0D12` background, `#111827` cards, `#1F2937` borders).
-- **Repurpose Studio**: Interactive multi-platform studio showing real video variant streaming, collapsible timestamped transcripts, `ContentBrief` takeaways, and native platform outputs for LinkedIn, Instagram, X (with thread cards and character validation), and YouTube (with real timestamped chapters).
+- **Carousel Studio (`/carousel`)**: 3-column studio featuring slide thumbnails, live 1080x1080 canvas preview with design template switches (`MINIMAL`, `EDITORIAL`, `BOLD`, `EDUCATIONAL`), real-time auto-saving properties inspector, AI generation modal, and export download modal (PNG / PDF).
 
 ### 2.2 Backend API (`apps/api`)
 - **Framework**: FastAPI with async route handlers and standard error envelopes.
-- **Configuration**: Pydantic `BaseSettings` (`config.py`) loading from environment variables and `.env`.
-- **Logging**: Structured JSON/formatted logging utility (`apps/api/utils/logging.py`) with secret redaction.
+- **Carousel API**: Full CRUD (`/api/carousels`), slide operations (`/api/carousels/{id}/slides`), slide reordering (`/api/carousels/{id}/slides/reorder`), async AI generation (`/api/carousels/{id}/generate`), and server-side rendering (`/api/carousels/{id}/render`).
 
-### 2.3 Media Engine & Worker Subsystem (`apps/api/services/media_service.py` & `apps/api/worker.py`)
+### 2.3 Media & AI Worker Subsystem (`apps/api/worker.py`)
 - **Queue**: Redis list queue (`reflow:media_jobs`) with in-process fallback.
-- **Worker**: Dedicated background worker executing dependency-ordered jobs:
-  `MEDIA_PROCESSING` $\rightarrow$ `TRANSCRIPTION` $\rightarrow$ `CONTENT_ANALYSIS` $\rightarrow$ `CONTENT_GENERATION`.
-- **Transcoding**: Aspect-ratio variants (`9:16`, `1:1`, `4:5`, `16:9`), real JPEG thumbnails (`00:00:01`), and clean audio extraction for speech-to-text.
+- **Worker Pipeline**:
+  - `MEDIA_PROCESSING`: Aspect-ratio transcoding + thumbnails.
+  - `TRANSCRIPTION`: Audio extraction + speech-to-text.
+  - `CONTENT_ANALYSIS`: Structured `ContentBrief` synthesis.
+  - `CONTENT_GENERATION`: Platform copies for LinkedIn, Instagram, X, and YouTube.
+  - `CAROUSEL_GENERATION`: AI slide deck planning + server-side rendering.
+  - `CAROUSEL_RENDER`: Server-side rasterization of 1080x1080 PNG slides and multi-page PDF compilation.
 
-### 2.4 AI Content Intelligence Engine (`apps/api/services/ai/`)
-- **Provider Abstraction**: `BaseAIProvider`, `OpenAIProvider`, `GeminiProvider`, and `MockAIProvider`.
-- **BYOK (Bring Your Own Key)**: Zero markup, keys remain server-side only.
-- **Prompt Injection Defense**: Source transcript is strictly treated as untrusted user data.
-- **Structured Outputs**: Validated against Pydantic schemas before persistence.
+### 2.4 Server-Side Carousel Rendering Engine (`apps/api/services/carousel_renderer.py`)
+- **Design System**: 4 deterministic styling themes with controlled typography scale, contrast ratios, and pagination chips.
+- **Rasterizer**: Produces high-resolution 1080x1080 PNG slide images and compiles standard multi-page PDF documents.
+- **Storage**: Persistent storage under `content/{content_id}/carousels/{carousel_id}/` with secure streaming via `/api/carousels/{id}/export/{export_id}`.
 
 ### 2.5 Database Layer (`apps/api/database.py`)
 - **Engine**: SQLAlchemy Async engine supporting SQLite (development) and PostgreSQL (production).
-- **Entities**:
-  - `Content`: Source canonical asset.
-  - `Asset`: Physical original files with probed metadata.
-  - `ContentVariant`: Generated aspect-ratio variants.
-  - `Transcript` & `TranscriptSegment`: Verbatim text with timestamps.
-  - `ContentBrief`: Reusable structured intelligence.
-  - `GeneratedContent`: Platform-specific native copies.
-  - `Job`: Background job lifecycle state tracking.
+- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Job`, `SystemLog`.

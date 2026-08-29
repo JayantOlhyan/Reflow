@@ -113,3 +113,56 @@ class OpenAIProvider(BaseAIProvider):
         )
         content_str = response.choices[0].message.content or "{}"
         return json.loads(content_str)
+
+    async def plan_carousel(
+        self,
+        title: str,
+        brief: Optional[Dict[str, Any]] = None,
+        transcript_text: Optional[str] = None,
+        target_slide_count: int = 5,
+        template: str = "MINIMAL",
+        tone: str = "informative",
+        custom_instructions: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Plans a structured carousel slide deck using OpenAI GPT-4o-mini."""
+        import openai
+        client = openai.AsyncOpenAI(api_key=self.api_key)
+
+        system_prompt = (
+            "You are a master carousel designer for LinkedIn and Instagram. Plan a structured slide deck. "
+            "Return valid JSON matching this schema:\n"
+            "{\n"
+            '  "title": "string",\n'
+            '  "template": "string",\n'
+            '  "slides": [\n'
+            '    {\n'
+            '      "position": 1,\n'
+            '      "purpose": "HOOK | PROBLEM | INSIGHT | KEY_POINT | EXAMPLE | STATISTIC | QUOTE | FRAMEWORK | SUMMARY | CTA",\n'
+            '      "layout": "TITLE | TITLE_BODY | FULL_IMAGE | QUOTE | STATISTIC | TWO_COLUMN | FRAMEWORK | CTA",\n'
+            '      "headline": "string",\n'
+            '      "body": "string",\n'
+            '      "tag": "string"\n'
+            '    }\n'
+            '  ]\n'
+            "}"
+        )
+
+        user_content = (
+            f"Title: {title}\n"
+            f"Target Slide Count: {target_slide_count}\n"
+            f"Template Style: {template}\n"
+            f"Content Brief:\n{json.dumps(brief or {}, indent=2)}\n\n"
+            f"=== UNTRUSTED SOURCE TEXT ===\n{(transcript_text or '')[:8000]}"
+        )
+
+        response = await client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3
+        )
+        content_str = response.choices[0].message.content or "{}"
+        return json.loads(content_str)

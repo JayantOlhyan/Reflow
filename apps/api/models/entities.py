@@ -22,6 +22,7 @@ class Content(Base):
     transcripts = relationship("Transcript", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
     briefs = relationship("ContentBrief", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
     generated_contents = relationship("GeneratedContent", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
+    carousels = relationship("Carousel", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
 
 class Asset(Base):
     __tablename__ = "assets"
@@ -68,11 +69,11 @@ class Transcript(Base):
     id = Column(String(64), primary_key=True, index=True)
     content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True)
     asset_id = Column(String(64), nullable=True)
-    provider = Column(String(32), default="mock")                  # openai, gemini, mock
+    provider = Column(String(32), default="mock")
     language = Column(String(16), default="en")
     text = Column(Text, nullable=False)
     duration = Column(Float, nullable=True)
-    status = Column(String(32), default="READY", index=True)       # PENDING, READY, FAILED
+    status = Column(String(32), default="READY", index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -154,7 +155,7 @@ class GeneratedContent(Base):
     platform = Column(String(32), nullable=False, index=True)      # LINKEDIN, INSTAGRAM, X, YOUTUBE
     generation_type = Column(String(64), nullable=False)           # POST, THREAD, REEL_CAPTION, VIDEO_METADATA
     status = Column(String(32), default="READY", index=True)       # GENERATING, READY, FAILED
-    content_payload_json = Column(Text, nullable=False)            # Structured JSON
+    content_payload_json = Column(Text, nullable=False)
     provider = Column(String(32), default="mock")
     model = Column(String(64), default="mock-model")
     prompt_version = Column(String(32), default="v1")
@@ -168,6 +169,82 @@ class GeneratedContent(Base):
     def payload(self):
         try: return json.loads(self.content_payload_json)
         except: return {}
+
+# ------------------------------------------------------------------------------
+# Phase 4 Carousel Engine Entities
+# ------------------------------------------------------------------------------
+
+class Carousel(Base):
+    __tablename__ = "carousels"
+
+    id = Column(String(64), primary_key=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    status = Column(String(32), default="READY", index=True)       # DRAFT, GENERATING, READY, FAILED, RENDERING
+    aspect_ratio = Column(String(16), default="1:1")               # 1:1, 4:5
+    template = Column(String(32), default="MINIMAL")               # MINIMAL, EDITORIAL, BOLD, EDUCATIONAL
+    slide_count = Column(Integer, default=0)
+    version = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    content = relationship("Content", back_populates="carousels")
+    slides = relationship("CarouselSlide", back_populates="carousel", cascade="all, delete-orphan", order_by="CarouselSlide.position", lazy="selectin")
+    exports = relationship("CarouselExport", back_populates="carousel", cascade="all, delete-orphan", lazy="selectin")
+
+class CarouselSlide(Base):
+    __tablename__ = "carousel_slides"
+
+    id = Column(String(64), primary_key=True, index=True)
+    carousel_id = Column(String(64), ForeignKey("carousels.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False, index=True)
+    purpose = Column(String(32), default="KEY_POINT")              # HOOK, PROBLEM, INSIGHT, KEY_POINT, EXAMPLE, STATISTIC, QUOTE, FRAMEWORK, SUMMARY, CTA
+    layout = Column(String(32), default="TITLE_BODY")              # TITLE, TITLE_BODY, FULL_IMAGE, QUOTE, STATISTIC, TWO_COLUMN, FRAMEWORK, CTA
+    headline = Column(String(255), nullable=False, default="")
+    body = Column(Text, nullable=False, default="")
+    tag = Column(String(64), nullable=True, default="")
+    background = Column(String(64), default="#0F172A")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    carousel = relationship("Carousel", back_populates="slides")
+    elements = relationship("SlideElement", back_populates="slide", cascade="all, delete-orphan", lazy="selectin")
+
+class SlideElement(Base):
+    __tablename__ = "slide_elements"
+
+    id = Column(String(64), primary_key=True, index=True)
+    slide_id = Column(String(64), ForeignKey("carousel_slides.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(String(32), nullable=False)                      # TEXT, IMAGE, SHAPE, ICON
+    position_x = Column(Float, default=0.0)
+    position_y = Column(Float, default=0.0)
+    width = Column(Float, default=100.0)
+    height = Column(Float, default=100.0)
+    content = Column(Text, default="")
+    style_json = Column(Text, default="{}")
+    z_index = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    slide = relationship("CarouselSlide", back_populates="elements")
+
+    @property
+    def style(self):
+        try: return json.loads(self.style_json)
+        except: return {}
+
+class CarouselExport(Base):
+    __tablename__ = "carousel_exports"
+
+    id = Column(String(64), primary_key=True, index=True)
+    carousel_id = Column(String(64), ForeignKey("carousels.id", ondelete="CASCADE"), nullable=False, index=True)
+    carousel_version = Column(Integer, default=1)
+    format = Column(String(16), nullable=False)                    # PNG, JPG, PDF
+    storage_key = Column(String(512), nullable=False)
+    file_size = Column(Integer, default=0)
+    status = Column(String(32), default="READY", index=True)       # GENERATING, READY, FAILED
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    carousel = relationship("Carousel", back_populates="exports")
 
 class PlatformConnection(Base):
     __tablename__ = "platform_connections"
@@ -204,7 +281,7 @@ class Job(Base):
     id = Column(String(64), primary_key=True, index=True)
     content_id = Column(String(64), nullable=True, index=True)
     asset_id = Column(String(64), nullable=True)
-    type = Column(String(64), nullable=False)                      # MEDIA_PROCESSING, TRANSCRIPTION, CONTENT_ANALYSIS, CONTENT_GENERATION
+    type = Column(String(64), nullable=False)                      # MEDIA_PROCESSING, TRANSCRIPTION, CONTENT_ANALYSIS, CONTENT_GENERATION, CAROUSEL_GENERATION, CAROUSEL_RENDER
     status = Column(String(32), default="QUEUED", index=True)       # QUEUED, RUNNING, SUCCEEDED, FAILED, RETRYING, CANCELLED
     payload_json = Column(Text, default="{}")
     attempts = Column(Integer, default=0)

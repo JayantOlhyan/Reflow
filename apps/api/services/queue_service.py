@@ -31,13 +31,21 @@ class QueueService:
             except Exception:
                 break
 
-    async def enqueue_media_job(self, job_id: str, content_id: str, asset_id: str, job_type: str = "MEDIA_PROCESSING") -> bool:
+    async def enqueue_media_job(
+        self, 
+        job_id: str, 
+        content_id: Optional[str] = None, 
+        asset_id: Optional[str] = None, 
+        job_type: str = "MEDIA_PROCESSING",
+        **kwargs
+    ) -> bool:
         """Pushes a job to the Redis queue or fallback queue."""
         payload = {
             "job_id": job_id,
             "content_id": content_id,
             "asset_id": asset_id,
-            "job_type": job_type
+            "job_type": job_type,
+            **kwargs
         }
         raw_msg = json.dumps(payload)
 

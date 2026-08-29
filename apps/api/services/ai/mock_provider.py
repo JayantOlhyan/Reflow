@@ -4,34 +4,40 @@ from services.ai.base_provider import BaseAIProvider
 
 class MockAIProvider(BaseAIProvider):
     provider_name: str = "mock"
-    model_name: str = "mock-deterministic-v1"
+    model_name: str = "mock-reflow-v1"
 
     async def transcribe(self, audio_file_path: str) -> Dict[str, Any]:
-        """Generates realistic timestamped transcript for testing/offline mode."""
-        sample_text = (
-            "Welcome to Reflow. In this episode, we are discussing how to turn a single source asset "
-            "into native multi-platform content. Instead of manually formatting clips for Instagram, "
-            "LinkedIn, X, and YouTube, we build an asynchronous engine that handles video transcoding, "
-            "speech recognition, and structured intelligence. This delivers 10x leverage for modern builders."
-        )
-        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', sample_text) if s.strip()]
-        segments = []
-        cur_time = 0.0
-        for i, sentence in enumerate(sentences):
-            duration = max(2.5, len(sentence.split()) * 0.4)
-            segments.append({
-                "sequence": i + 1,
-                "start_time": round(cur_time, 2),
-                "end_time": round(cur_time + duration, 2),
-                "text": sentence
-            })
-            cur_time += duration
-
+        """Returns deterministic, timestamped mock transcript segments."""
         return {
-            "text": sample_text,
+            "text": "Welcome to Reflow. Today we are breaking down how creators can turn one source video into multi-platform distribution. We cover aspect ratios, AI intelligence, and multi-slide carousels.",
             "language": "en",
-            "duration": round(cur_time, 2),
-            "segments": segments
+            "duration": 18.5,
+            "segments": [
+                {
+                    "sequence": 1,
+                    "start_time": 0.0,
+                    "end_time": 4.2,
+                    "text": "Welcome to Reflow."
+                },
+                {
+                    "sequence": 2,
+                    "start_time": 4.2,
+                    "end_time": 9.5,
+                    "text": "Today we are breaking down how creators can turn one source video into multi-platform distribution."
+                },
+                {
+                    "sequence": 3,
+                    "start_time": 9.5,
+                    "end_time": 14.0,
+                    "text": "We cover aspect ratios, AI intelligence, and multi-slide carousels."
+                },
+                {
+                    "sequence": 4,
+                    "start_time": 14.0,
+                    "end_time": 18.5,
+                    "text": "Let's dive right into the architectural breakdown."
+                }
+            ]
         }
 
     async def analyze_content(
@@ -40,29 +46,31 @@ class MockAIProvider(BaseAIProvider):
         transcript_text: str,
         segments: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
+        """Returns a structured, deterministic ContentBrief."""
         return {
-            "title": title or "Content Operating System Blueprint",
-            "summary": f"A comprehensive breakdown of '{title}', examining how modular pipelines, local-first workflows, and unified media engines empower creators to automate multi-platform distribution.",
-            "topics": ["Content Automation", "Software Architecture", "Creator Economy", "AI Pipelines"],
-            "keywords": ["Reflow", "FastAPI", "FFmpeg", "Transcoding", "Next.js", "Self-Hosted"],
-            "audience": "Software Engineers, Solopreneurs, Technical Content Creators",
-            "tone": "Insightful, Pragmatic & Actionable",
+            "title": title or "Content Repurposing Architecture",
+            "summary": "A comprehensive walkthrough on automating content distribution across social channels from a single canonical media asset.",
+            "topics": ["Content Automation", "Media Processing", "FFmpeg Pipelines", "AI Repurposing"],
+            "keywords": ["reflow", "ffmpeg", "transcoding", "ai-brief", "distribution"],
+            "audience": "Software Engineers, Technical Creators & Agency Operators",
+            "tone": "Authoritative, Practical & High Signal",
             "key_points": [
-                "Single-asset canonical ingestion eliminates redundant creative friction.",
-                "Deterministic media transcoding produces clean 9:16, 1:1, and 4:5 aspect ratios without distortion.",
-                "Background Redis workers prevent API blocking during CPU-intensive media transformations."
+                "Single source assets maximize creative leverage while minimizing production overhead.",
+                "Automated aspect ratio adaptation prevents platform-specific formatting fatigue.",
+                "AI content briefs enable rapid generation of high-retention text formats."
             ],
             "hooks": [
-                "Stop spending 10 hours formatting clips for 5 platforms.",
-                "How to build a personal content operating system from scratch.",
-                "The secret to shipping cross-platform without burning out."
+                "Stop manually editing video dimensions for 6 different social apps.",
+                "How we built an automated content operating system with FFmpeg and AI.",
+                "The 3-layer architecture for 10x content velocity."
             ],
             "quotes": [
-                "Create once. Transform everywhere."
+                "Create once. Transform everywhere.",
+                "Focus 80% of your energy on high-signal core ideas rather than platform formatting."
             ],
             "cta_suggestions": [
-                "Deploy Reflow on your own infrastructure with Docker today.",
-                "Drop your biggest content bottleneck in the comments below."
+                "Try Reflow open-source on GitHub today.",
+                "Star the repository and deploy locally with Docker."
             ]
         }
 
@@ -74,73 +82,142 @@ class MockAIProvider(BaseAIProvider):
         tone: str = "professional",
         custom_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
-        title = brief.get("title", "Content Strategy")
+        """Returns platform-specific structured copies based on the brief."""
+        plat = platform.upper()
+        title = brief.get("title", "High-Signal Architecture")
         summary = brief.get("summary", "")
-        key_points = brief.get("key_points", [])
-        hooks = brief.get("hooks", ["Automate your content engine"])
-        cta = brief.get("cta_suggestions", ["Check out the repo!"])[0] if brief.get("cta_suggestions") else "Follow for more!"
+        hooks = brief.get("hooks", ["Automate your content distribution today."])
+        key_points = brief.get("key_points", ["Scale your creative output efficiently."])
 
-        plt = platform.upper()
-        if plt == "LINKEDIN":
-            points_formatted = "\n\n".join([f"• {pt}" for pt in key_points])
-            body = f"{summary}\n\nKey Engineering Takeaways:\n\n{points_formatted}"
+        if plat == "LINKEDIN":
             return {
-                "title": f"How We Engineered: {title}",
-                "hook": hooks[0] if hooks else "Modern content velocity requires modern architecture.",
-                "body": body,
-                "key_takeaway": "Decoupling canonical asset ingestion from platform formatting delivers 10x leverage.",
-                "call_to_action": cta,
-                "hashtags": ["#SoftwareEngineering", "#Architecture", "#Automation", "#OpenSource"]
+                "title": f"{title} | Deep Dive",
+                "hook": hooks[0],
+                "body": f"Most creators spend 80% of their time on repetitive distribution work.\n\nHere is how to solve it:\n" + "\n".join([f"• {kp}" for kp in key_points]) + f"\n\n{summary}",
+                "key_takeaway": "Automate the transformation pipeline so you can focus exclusively on core thesis development.",
+                "call_to_action": "What is the biggest bottleneck in your publishing pipeline?",
+                "hashtags": ["#ContentEngineering", "#OpenSource", "#AIAutomation", "#SoftwareArchitecture"]
             }
 
-        elif plt == "INSTAGRAM":
+        elif plat == "INSTAGRAM":
             return {
-                "hook": hooks[0] if hooks else "Stop doing repetitive work manually 🔥",
-                "caption": f"{summary}\n\nHere is how to automate your pipeline 👇\n\n1. Ingest canonical source\n2. Deterministic aspect-ratio transforms\n3. Structured AI synthesis\n\nSave this post for your next architecture review! 📌",
-                "call_to_action": cta,
-                "hashtags": ["#buildinpublic", "#softwaredeveloper", "#automation", "#techstack", "#saas"]
+                "hook": f"🚀 {hooks[0]}",
+                "caption": f"{hooks[0]}\n\n{summary}\n\nKey Takeaways:\n" + "\n".join([f"⚡ {kp}" for kp in key_points]) + "\n\nSave this reel for your next production build.",
+                "call_to_action": "Drop a comment below with your thoughts!",
+                "hashtags": ["#creatoreconomy", "#coding", "#buildinpublic", "#automation", "#softwaredev"]
             }
 
-        elif plt == "X":
-            post1 = f"{hooks[0] if hooks else title}\n\nA breakdown of how to build a unified content distribution engine 🧵👇"
-            post2 = f"1/ The Bottleneck:\nCreators waste 15+ hours weekly reformatting 1 video for 5 platforms.\n\nSolution: Canonical asset ingestion with background worker dispatch."
-            post3 = f"2/ The Pipeline:\n• FFmpeg for 9:16, 1:1, 4:5\n• Speech transcription\n• Structured ContentBrief synthesis\n• Native platform adaptation"
-            post4 = f"3/ The Result:\nCreate once. Transform everywhere.\n\n{cta}"
+        elif plat == "X":
+            posts = [
+                f"1/4 {hooks[0]}\n\nA breakdown on building automated content pipelines 🧵👇",
+                f"2/4 The core bottleneck:\n\n{key_points[0] if key_points else 'Manual formatting wastes hours.'}",
+                f"3/4 How to solve it with Reflow:\n\n{key_points[1] if len(key_points) > 1 else 'Use automated transcoding & AI brief extraction.'}",
+                f"4/4 In summary:\n\n{summary[:180]}\n\nCheck out Reflow on GitHub! 🚀"
+            ]
             return {
-                "thread_title": f"Breakdown: {title}",
-                "posts": [post1, post2, post3, post4],
-                "total_posts": 4
+                "thread_title": f"Thread: {title}",
+                "posts": posts,
+                "total_posts": len(posts)
             }
 
-        elif plt == "YOUTUBE":
-            # Generate chapters using real timestamps from segments if available
+        elif plat == "YOUTUBE":
             chapters = []
-            if segments and len(segments) >= 2:
-                for seg in segments[:5]:
-                    secs = int(seg.get("start_time", 0))
-                    mins = secs // 60
-                    remainder = secs % 60
-                    ts_str = f"{mins:02d}:{remainder:02d}"
-                    txt_snip = seg.get("text", "Section")[:30].strip()
-                    chapters.append({"timestamp": ts_str, "title": txt_snip})
+            if segments:
+                for seg in segments:
+                    mins = int(seg["start_time"] // 60)
+                    secs = int(seg["start_time"] % 60)
+                    chapters.append({
+                        "timestamp": f"{mins:02d}:{secs:02d}",
+                        "title": seg["text"][:35]
+                    })
             else:
                 chapters = [
-                    {"timestamp": "00:00", "title": "Introduction & Overview"},
-                    {"timestamp": "01:15", "title": "System Architecture"},
-                    {"timestamp": "03:40", "title": "Media Engine & Transcoding"},
-                    {"timestamp": "06:10", "title": "Summary & Next Steps"}
+                    {"timestamp": "00:00", "title": "Introduction & Problem"},
+                    {"timestamp": "00:45", "title": "System Architecture Overview"},
+                    {"timestamp": "01:30", "title": "Live Automation Demo"},
+                    {"timestamp": "02:15", "title": "Conclusion & Next Steps"}
                 ]
 
             return {
-                "title": f"{title} — Full Engineering & Content Breakdown"[:100],
-                "description": f"In this video, we dive deep into {title}.\n\n{summary}\n\n⏱️ Chapters:\n" + "\n".join([f"{c['timestamp']} - {c['title']}" for c in chapters]) + f"\n\n👉 {cta}",
-                "tags": ["Reflow", "Engineering", "Python", "Nextjs", "AI", "OpenSource"],
+                "title": f"{title} (Full Walkthrough)".strip()[:100],
+                "description": f"{summary}\n\nChapters:\n" + "\n".join([f"{ch['timestamp']} - {ch['title']}" for ch in chapters]) + "\n\n#Reflow #OpenSource",
+                "tags": ["Reflow", "Open Source", "Content Repurposing", "FastAPI", "NextJS"],
                 "chapters": chapters
             }
 
         else:
-            return {
-                "title": title,
-                "content": summary,
-                "cta": cta
-            }
+            return {"raw_text": f"{title}\n\n{summary}"}
+
+    async def plan_carousel(
+        self,
+        title: str,
+        brief: Optional[Dict[str, Any]] = None,
+        transcript_text: Optional[str] = None,
+        target_slide_count: int = 5,
+        template: str = "MINIMAL",
+        tone: str = "informative",
+        custom_instructions: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Returns deterministic, high-quality structured carousel slides."""
+        deck_title = title or (brief.get("title") if brief else "Automated Content Operating System")
+        summary = brief.get("summary", "How to 10x your creative output with automated pipelines.") if brief else "The definitive breakdown for modern creators."
+        key_points = brief.get("key_points", [
+            "Create once and transform everywhere.",
+            "Aspect ratio conversion eliminates manual cropping.",
+            "Structured AI brief extraction preserves core thesis."
+        ]) if brief else [
+            "Create once and transform everywhere.",
+            "Aspect ratio conversion eliminates manual cropping.",
+            "Structured AI brief extraction preserves core thesis."
+        ]
+
+        count = max(4, min(12, target_slide_count))
+        slides = []
+
+        # Slide 1: HOOK / Title
+        slides.append({
+            "position": 1,
+            "purpose": "HOOK",
+            "layout": "TITLE",
+            "headline": deck_title[:60],
+            "body": summary[:140],
+            "tag": "FOUNDATION"
+        })
+
+        # Slide 2: PROBLEM
+        slides.append({
+            "position": 2,
+            "purpose": "PROBLEM",
+            "layout": "TITLE_BODY",
+            "headline": "The Distribution Bottleneck",
+            "body": "Creators waste over 15 hours every week manually adapting content across Instagram, LinkedIn, and YouTube.",
+            "tag": "PROBLEM"
+        })
+
+        # Dynamic Key Point slides
+        for i in range(3, count):
+            kp_idx = (i - 3) % len(key_points)
+            slides.append({
+                "position": i,
+                "purpose": "KEY_POINT",
+                "layout": "TITLE_BODY",
+                "headline": f"0{i-2}. {key_points[kp_idx][:40]}",
+                "body": key_points[kp_idx],
+                "tag": "INSIGHT"
+            })
+
+        # Final Slide: CTA
+        slides.append({
+            "position": count,
+            "purpose": "CTA",
+            "layout": "CTA",
+            "headline": "Deploy Reflow Today",
+            "body": "Run locally with Docker in under 2 minutes or star the open-source repo on GitHub.",
+            "tag": "ACTION"
+        })
+
+        return {
+            "title": deck_title,
+            "template": template.upper(),
+            "slides": slides
+        }

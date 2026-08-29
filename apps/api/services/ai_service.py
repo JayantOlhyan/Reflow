@@ -6,10 +6,14 @@ from sqlalchemy import select, delete
 
 from config import settings
 from database import async_session_factory
-from models.entities import Content, Asset, Transcript, TranscriptSegment, ContentBrief, GeneratedContent
+from models.entities import (
+    Content, Asset, Transcript, TranscriptSegment, ContentBrief, 
+    GeneratedContent, Carousel, CarouselSlide, SlideElement
+)
 from models.schemas import (
     ContentBriefSchema, LinkedInPostSchema, InstagramPostSchema,
-    XThreadPostSchema, XPostSchema, YouTubePostSchema
+    XThreadPostSchema, XPostSchema, YouTubePostSchema,
+    CarouselPlanSchema
 )
 from services.ai.base_provider import BaseAIProvider
 from services.ai.mock_provider import MockAIProvider
@@ -276,5 +280,122 @@ class AIService:
             await session.commit()
             logger.info(f"Successfully generated {len(generated_list)} platform contents for Content {content_id}.")
             return generated_list
+
+    async def plan_and_persist_carousel(
+        self,
+        carousel_id: str,
+        content_id: Optional[str] = None,
+        target_slide_count: int = 5,
+        template: str = "MINIMAL",
+        tone: str = "informative",
+        custom_instructions: Optional[str] = None
+    ) -> Carousel:
+        """
+        Plans a structured carousel slide deck with Pydantic validation, preserving previous slides upon failure.
+        """
+        provider = self.get_provider()
+        logger.info(f"Planning carousel {carousel_id} (Content: {content_id}) using {provider.provider_name}...")
+
+        brief_dict = None
+        source_text = None
+        target_title = "Automated Slide Deck"
+
+        async with async_session_factory() as session:
+            c_res = await session.execute(select(Carousel).where(Carousel.id == carousel_id))
+            carousel = c_res.scalar_one_or_none()
+            if not carousel:
+                raise ValueError(f"Carousel {carousel_id} not found.")
+
+            target_title = carousel.title
+
+            if content_id or carousel.content_id:
+                cid = content_id or carousel.content_id
+                cnt_res = await session.execute(select(Content).where(Content.id == cid))
+                cnt = cnt_res.scalar_one_or_none()
+                if cnt:
+                    target_title = cnt.title
+                    source_text = cnt.text_content or ""
+                    if cnt.transcripts:
+                        source_text = cnt.transcripts[0].text
+                    if cnt.briefs:
+                        b = cnt.briefs[0]
+                        brief_dict = {
+                            "title": b.title,
+                            "summary": b.summary,
+                            "key_points": b.key_points,
+                            "hooks": b.hooks,
+                            "quotes": b.quotes
+                        }
+
+        # Call AI provider
+        raw_plan = await provider.plan_carousel(
+            title=target_title,
+            brief=brief_dict,
+            transcript_text=source_text,
+            target_slide_count=target_slide_count,
+            template=template,
+            tone=tone,
+            custom_instructions=custom_instructions
+        )
+
+        # Validate with Pydantic CarouselPlanSchema
+        validated_plan = CarouselPlanSchema(**raw_plan)
+
+        # Persist to database atomically
+        async with async_session_factory() as session:
+            c_res = await session.execute(select(Carousel).where(Carousel.id == carousel_id))
+            carousel = c_res.scalar_one_or_none()
+            if not carousel:
+                raise ValueError(f"Carousel {carousel_id} not found during commit.")
+
+            carousel.title = validated_plan.title
+            carousel.template = validated_plan.template.upper()
+            carousel.slide_count = len(validated_plan.slides)
+            carousel.version += 1
+            carousel.status = "READY"
+            carousel.updated_at = datetime.utcnow()
+
+            # Delete old slides and elements
+            old_slides_res = await session.execute(
+                select(CarouselSlide).where(CarouselSlide.carousel_id == carousel_id)
+            )
+            for s in old_slides_res.scalars().all():
+                await session.delete(s)
+
+            # Insert validated slides
+            for slide_data in validated_plan.slides:
+                slide_id = f"sld_{uuid.uuid4().hex[:12]}"
+                slide_entity = CarouselSlide(
+                    id=slide_id,
+                    carousel_id=carousel_id,
+                    position=slide_data.position,
+                    purpose=slide_data.purpose,
+                    layout=slide_data.layout,
+                    headline=slide_data.headline,
+                    body=slide_data.body,
+                    tag=slide_data.tag or "INSIGHT",
+                    background="#0F172A",
+                    created_at=datetime.utcnow()
+                )
+                session.add(slide_entity)
+
+                # Add default text element for future canvas manipulations
+                elem = SlideElement(
+                    id=f"elm_{uuid.uuid4().hex[:12]}",
+                    slide_id=slide_id,
+                    type="TEXT",
+                    position_x=80.0,
+                    position_y=200.0,
+                    width=920.0,
+                    height=600.0,
+                    content=f"{slide_data.headline}\n\n{slide_data.body}",
+                    style_json=json.dumps({"fontSize": 32, "color": "#FFFFFF"}),
+                    z_index=1
+                )
+                session.add(elem)
+
+            await session.commit()
+            logger.info(f"Successfully saved {len(validated_plan.slides)} slides for Carousel {carousel_id} (Version {carousel.version}).")
+            return carousel
 
 ai_service = AIService()
