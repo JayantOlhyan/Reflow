@@ -292,6 +292,8 @@ class ClipVariantResponse(BaseModel):
     height: Optional[int] = None
     duration: Optional[float] = None
     file_size: int = 0
+    has_captions: bool = False
+    caption_style: Optional[str] = None
     status: str
     created_at: Optional[datetime] = None
 
@@ -314,6 +316,10 @@ class ClipResponse(BaseModel):
     transcript_excerpt: Optional[str] = ""
     thumbnail_path: Optional[str] = None
     discovery_version: str = "v1"
+    caption_style: str = "BOLD_PUNCH"
+    caption_enabled: bool = True
+    highlight_keywords: List[str] = []
+    caption_custom_settings: Dict[str, Any] = {}
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     variants: List[ClipVariantResponse] = []
@@ -335,10 +341,42 @@ class ClipUpdateRequest(BaseModel):
     hook: Optional[str] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
+    caption_style: Optional[str] = None
+    caption_enabled: Optional[bool] = None
+    highlight_keywords: Optional[List[str]] = None
 
 class ClipGenerateRequest(BaseModel):
     aspect_ratios: List[str] = Field(default=["9:16"])
     include_thumbnail: bool = True
+    burn_captions: bool = False
+    caption_style: Optional[str] = None
+
+# Phase 6 Caption Schemas
+class CaptionCueSchema(BaseModel):
+    start_time: float
+    end_time: float
+    text: str
+    highlight_words: List[str] = []
+
+class ClipCaptionsResponse(BaseModel):
+    clip_id: str
+    caption_style: str
+    caption_enabled: bool
+    highlight_keywords: List[str] = []
+    cues: List[CaptionCueSchema] = []
+    srt_content: str = ""
+    vtt_content: str = ""
+
+class ClipCaptionsUpdateRequest(BaseModel):
+    caption_style: Optional[str] = None
+    caption_enabled: Optional[bool] = None
+    highlight_keywords: Optional[List[str]] = None
+    custom_settings: Optional[Dict[str, Any]] = None
+
+class ClipCaptionRenderRequest(BaseModel):
+    aspect_ratios: List[str] = Field(default=["9:16"])
+    caption_style: Optional[str] = None
+    highlight_keywords: Optional[List[str]] = None
 
 class ContentResponse(BaseModel):
     id: str
@@ -400,6 +438,150 @@ class SchedulePostRequest(BaseModel):
     platform: str
     format: str
     scheduled_time: str
+
+# Phase 7 Platform Connections & Publishing Schemas
+class PlatformConnectionResponse(BaseModel):
+    id: str
+    platform: str
+    name: str
+    account_name: Optional[str] = ""
+    handle: Optional[str] = ""
+    external_account_id: Optional[str] = None
+    status: str = "CONNECTED"
+    avatar_url: Optional[str] = ""
+    capabilities: List[str] = []
+    scopes: List[str] = []
+    token_expires_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PlatformConnectionListResponse(BaseModel):
+    items: List[PlatformConnectionResponse]
+    total: int
+
+class OAuthStartResponse(BaseModel):
+    platform: str
+    authorization_url: str
+    state: str
+
+class PublicationCreateRequest(BaseModel):
+    content_id: str
+    variant_id: Optional[str] = None
+    platform_connection_id: str
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = ""
+    tags: List[str] = Field(default_factory=list)
+    privacy: str = Field(default="PRIVATE", description="PRIVATE | UNLISTED | PUBLIC")
+
+class PublicationResponse(BaseModel):
+    id: str
+    content_id: str
+    variant_id: Optional[str] = None
+    platform_connection_id: Optional[str] = None
+    platform: str
+    status: str
+    title: str
+    description: Optional[str] = ""
+    privacy: str = "PRIVATE"
+    tags: List[str] = []
+    external_post_id: Optional[str] = None
+    external_url: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    attempt_count: int = 0
+    
+    # Phase 9: Scheduling
+    scheduled_at: Optional[datetime] = None
+    timezone: Optional[str] = None
+    claimed_at: Optional[datetime] = None
+    claim_owner: Optional[str] = None
+    cancelled_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PublicationListResponse(BaseModel):
+    items: List[PublicationResponse]
+    total: int
+
+class PublicationDestinationItem(BaseModel):
+    platform_connection_id: str
+    title: Optional[str] = ""
+    description: Optional[str] = ""
+    privacy: Optional[str] = "PRIVATE"
+    tags: Optional[List[str]] = []
+
+class BatchPublicationCreateRequest(BaseModel):
+    content_id: str
+    variant_id: Optional[str] = None
+    destinations: List[PublicationDestinationItem] = Field(..., min_items=1)
+
+class BatchPublicationResponse(BaseModel):
+    publications: List[PublicationResponse]
+    queued_count: int
+
+# Phase 9: Scheduling & Calendar Schemas
+class ScheduleDestinationItem(BaseModel):
+    platform_connection_id: str
+    title: Optional[str] = ""
+    description: Optional[str] = ""
+    privacy: Optional[str] = "PRIVATE"
+    tags: Optional[List[str]] = []
+
+class SchedulePublicationCreateRequest(BaseModel):
+    content_id: str
+    variant_id: Optional[str] = None
+    scheduled_time: str = Field(..., description="ISO 8601 string in local time, e.g. 2026-09-10T14:30:00")
+    timezone: str = Field(default="UTC", description="IANA timezone name, e.g. 'Asia/Kolkata' or 'America/New_York'")
+    destinations: List[ScheduleDestinationItem] = Field(..., min_items=1)
+
+class SchedulePublicationResponse(BaseModel):
+    publications: List[PublicationResponse]
+    scheduled_count: int
+    scheduled_at_utc: datetime
+    timezone: str
+
+class RescheduleRequest(BaseModel):
+    scheduled_time: str = Field(..., description="ISO 8601 string in local time, e.g. 2026-09-10T15:30:00")
+    timezone: Optional[str] = Field(default=None, description="IANA timezone name")
+
+class CalendarEventItem(BaseModel):
+    id: str
+    publication_id: str
+    content_id: str
+    content_title: str
+    content_type: str
+    thumbnail_path: Optional[str] = None
+    variant_id: Optional[str] = None
+    platform: str
+    platform_connection_id: Optional[str] = None
+    account_name: Optional[str] = ""
+    handle: Optional[str] = ""
+    status: str
+    title: str
+    description: str
+    privacy: str
+    scheduled_at: datetime
+    scheduled_at_local: str
+    timezone: str
+    published_at: Optional[datetime] = None
+    external_post_id: Optional[str] = None
+    external_url: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+class CalendarResponse(BaseModel):
+    items: List[CalendarEventItem]
+    total: int
+    start_utc: datetime
+    end_utc: datetime
+    timezone: str
 
 class PlatformConnectionSchema(BaseModel):
     id: str

@@ -24,6 +24,7 @@ class Content(Base):
     generated_contents = relationship("GeneratedContent", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
     carousels = relationship("Carousel", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
     clips = relationship("Clip", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
+    publications = relationship("Publication", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
 
 class Asset(Base):
     __tablename__ = "assets"
@@ -270,6 +271,10 @@ class Clip(Base):
     transcript_excerpt = Column(Text, default="")
     thumbnail_path = Column(String(512), nullable=True)
     discovery_version = Column(String(32), default="v1")
+    caption_style = Column(String(64), default="BOLD_PUNCH")      # BOLD_PUNCH, CLEAN_SUBTITLE, KINETIC_HIGHLIGHT, MINIMAL_WHITE
+    caption_enabled = Column(Boolean, default=True)
+    highlight_keywords_json = Column(Text, default="[]")
+    caption_custom_settings_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -281,12 +286,22 @@ class Clip(Base):
         try: return json.loads(self.source_transcript_segment_ids_json)
         except: return []
 
+    @property
+    def highlight_keywords(self):
+        try: return json.loads(self.highlight_keywords_json)
+        except: return []
+
+    @property
+    def caption_custom_settings(self):
+        try: return json.loads(self.caption_custom_settings_json)
+        except: return {}
+
 class ClipVariant(Base):
     __tablename__ = "clip_variants"
 
     id = Column(String(64), primary_key=True, index=True)
     clip_id = Column(String(64), ForeignKey("clips.id", ondelete="CASCADE"), nullable=False, index=True)
-    variant_type = Column(String(64), nullable=False, index=True)  # MASTER, VERTICAL_9_16, SQUARE_1_1, PORTRAIT_4_5, LANDSCAPE_16_9, THUMBNAIL
+    variant_type = Column(String(64), nullable=False, index=True)  # MASTER, VERTICAL_9_16, SQUARE_1_1, PORTRAIT_4_5, LANDSCAPE_16_9, THUMBNAIL, CAPTIONED_VERTICAL_9_16, etc.
     aspect_ratio = Column(String(16), default="9:16")              # 9:16, 1:1, 4:5, 16:9
     storage_key = Column(String(512), nullable=False)
     mime_type = Column(String(128), default="video/mp4")
@@ -294,6 +309,8 @@ class ClipVariant(Base):
     height = Column(Integer, nullable=True)
     duration = Column(Float, nullable=True)
     file_size = Column(Integer, default=0)
+    has_captions = Column(Boolean, default=False)
+    caption_style = Column(String(64), nullable=True)
     status = Column(String(32), default="READY", index=True)       # QUEUED, PROCESSING, READY, FAILED
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -303,17 +320,81 @@ class PlatformConnection(Base):
     __tablename__ = "platform_connections"
 
     id = Column(String(64), primary_key=True, index=True)
-    name = Column(String(64), nullable=False)
+    platform = Column(String(32), nullable=False, index=True)      # youtube, instagram, linkedin, x, facebook, tiktok, pinterest, threads
+    name = Column(String(128), nullable=False)
+    account_name = Column(String(128), default="")
     handle = Column(String(128), default="")
-    connected = Column(Boolean, default=False)
+    external_account_id = Column(String(128), nullable=True, index=True)
+    status = Column(String(32), default="CONNECTED", index=True)   # CONNECTED, DISCONNECTED, REAUTH_REQUIRED, EXPIRED
     avatar_url = Column(String(512), default="")
+    access_token_encrypted = Column(Text, nullable=True)
+    refresh_token_encrypted = Column(Text, nullable=True)
+    token_expires_at = Column(DateTime, nullable=True)
+    scopes_json = Column(Text, default="[]")
     capabilities_json = Column(Text, default="[]")
+    metadata_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    publications = relationship("Publication", back_populates="connection")
 
     @property
     def capabilities(self):
         try: return json.loads(self.capabilities_json)
+        except: return []
+
+    @property
+    def scopes(self):
+        try: return json.loads(self.scopes_json)
+        except: return []
+
+    @property
+    def metadata_dict(self):
+        try: return json.loads(self.metadata_json)
+        except: return {}
+
+class Publication(Base):
+    __tablename__ = "publications"
+
+    id = Column(String(64), primary_key=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True)
+    variant_id = Column(String(64), nullable=True, index=True)
+    platform_connection_id = Column(String(64), ForeignKey("platform_connections.id", ondelete="SET NULL"), nullable=True, index=True)
+    platform = Column(String(32), nullable=False, index=True)      # youtube, instagram, linkedin, x, etc.
+    status = Column(String(32), default="DRAFT", index=True)       # DRAFT, SCHEDULED, QUEUED, UPLOADING, PUBLISHING, PUBLISHED, FAILED, REAUTH_REQUIRED, CANCELLED
+    title = Column(String(255), nullable=False)
+    description = Column(Text, default="")
+    privacy = Column(String(32), default="PRIVATE")                # PRIVATE, UNLISTED, PUBLIC
+    tags_json = Column(Text, default="[]")
+    external_post_id = Column(String(128), nullable=True, index=True)
+    external_url = Column(String(512), nullable=True)
+    request_payload_hash = Column(String(64), nullable=False, index=True)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    attempt_count = Column(Integer, default=0)
+    
+    # Phase 9: Scheduling & Claim fields
+    scheduled_at = Column(DateTime, nullable=True, index=True)     # Canonical UTC timestamp
+    timezone = Column(String(64), nullable=True)                   # Canonical IANA timezone, e.g. "Asia/Kolkata"
+    claimed_at = Column(DateTime, nullable=True)                   # Timestamp when scheduler acquired lock lease
+    claim_owner = Column(String(64), nullable=True)                # Scheduler instance ID that holds claim
+    cancelled_at = Column(DateTime, nullable=True)
+    failed_at = Column(DateTime, nullable=True)
+    published_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_publications_status_scheduled_at", "status", "scheduled_at"),
+    )
+
+    content = relationship("Content", back_populates="publications")
+    connection = relationship("PlatformConnection", back_populates="publications")
+
+    @property
+    def tags(self):
+        try: return json.loads(self.tags_json)
         except: return []
 
 class Workflow(Base):

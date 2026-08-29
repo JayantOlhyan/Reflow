@@ -45,17 +45,129 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     
+    # Security & Credential Encryption
+    ENCRYPTION_SECRET: str = Field(
+        default="reflow_dev_secret_key_change_in_production_32b",
+        description="Master server key used to encrypt OAuth tokens at rest"
+    )
+
     # Platform App OAuth Credentials (Configured by self-hosted admin)
     YOUTUBE_CLIENT_ID: Optional[str] = None
     YOUTUBE_CLIENT_SECRET: Optional[str] = None
+    YOUTUBE_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/youtube/callback",
+        description="OAuth 2.0 callback redirect URI for Google/YouTube"
+    )
+    YOUTUBE_SCOPES: List[str] = Field(
+        default=[
+            "https://www.googleapis.com/auth/youtube.upload",
+            "https://www.googleapis.com/auth/youtube.readonly",
+            "https://www.googleapis.com/auth/userinfo.profile"
+        ]
+    )
+
+    # Meta (Instagram & Facebook)
     META_CLIENT_ID: Optional[str] = None
     META_CLIENT_SECRET: Optional[str] = None
-    TIKTOK_CLIENT_KEY: Optional[str] = None
-    TIKTOK_CLIENT_SECRET: Optional[str] = None
+    INSTAGRAM_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/instagram/callback",
+        description="OAuth 2.0 callback redirect URI for Instagram"
+    )
+    INSTAGRAM_SCOPES: List[str] = Field(
+        default=[
+            "instagram_basic",
+            "instagram_content_publish",
+            "pages_show_list",
+            "pages_read_engagement"
+        ]
+    )
+    FACEBOOK_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/facebook/callback",
+        description="OAuth 2.0 callback redirect URI for Facebook Pages"
+    )
+    FACEBOOK_SCOPES: List[str] = Field(
+        default=[
+            "pages_manage_posts",
+            "pages_read_engagement",
+            "pages_show_list",
+            "publish_video"
+        ]
+    )
+
+    # LinkedIn
     LINKEDIN_CLIENT_ID: Optional[str] = None
     LINKEDIN_CLIENT_SECRET: Optional[str] = None
+    LINKEDIN_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/linkedin/callback",
+        description="OAuth 2.0 callback redirect URI for LinkedIn"
+    )
+    LINKEDIN_SCOPES: List[str] = Field(
+        default=[
+            "openid",
+            "profile",
+            "email",
+            "w_member_social"
+        ]
+    )
+
+    # X / Twitter
     X_CLIENT_ID: Optional[str] = None
     X_CLIENT_SECRET: Optional[str] = None
+    X_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/x/callback",
+        description="OAuth 2.0 callback redirect URI for X (Twitter)"
+    )
+    X_SCOPES: List[str] = Field(
+        default=[
+            "tweet.read",
+            "tweet.write",
+            "users.read",
+            "offline.access"
+        ]
+    )
+
+    # TikTok
+    TIKTOK_CLIENT_KEY: Optional[str] = None
+    TIKTOK_CLIENT_SECRET: Optional[str] = None
+    TIKTOK_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/tiktok/callback",
+        description="OAuth 2.0 callback redirect URI for TikTok"
+    )
+    TIKTOK_SCOPES: List[str] = Field(
+        default=["user.info.basic", "video.upload", "video.publish"]
+    )
+
+    # Pinterest
+    PINTEREST_APP_ID: Optional[str] = None
+    PINTEREST_APP_SECRET: Optional[str] = None
+    PINTEREST_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/pinterest/callback"
+    )
+
+    # Threads
+    THREADS_APP_ID: Optional[str] = None
+    THREADS_APP_SECRET: Optional[str] = None
+    THREADS_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/connections/threads/callback"
+    )
+
+    # Phase 9: Scheduler Engine Configuration
+    SCHEDULER_MIN_LEAD_SECONDS: int = Field(
+        default=60,
+        description="Minimum seconds required between current time and scheduled time"
+    )
+    SCHEDULER_POLL_INTERVAL_SECONDS: float = Field(
+        default=5.0,
+        description="Tick frequency in seconds for scheduler daemon to claim due publications"
+    )
+    SCHEDULER_CLAIM_LEASE_SECONDS: int = Field(
+        default=120,
+        description="Lease timeout before a claimed publication is considered stale and recovered"
+    )
+    SCHEDULER_MISSED_POLICY: str = Field(
+        default="EXECUTE_IMMEDIATELY",
+        description="Policy for missed publications on recovery: 'EXECUTE_IMMEDIATELY' | 'MARK_FAILED'"
+    )
 
     class Config:
         env_file = ".env"

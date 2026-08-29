@@ -68,19 +68,29 @@ class HealthService:
             return {"status": "healthy", "details": f"Configured providers: {', '.join(providers)}"}
         return {"status": "not_configured", "details": "No API keys configured (offline mock active)"}
 
+    def check_scheduler(self) -> Dict[str, str]:
+        from services.scheduler_service import scheduler_service
+        telemetry = scheduler_service.get_telemetry()
+        return {
+            "status": "healthy" if telemetry["status"] == "HEALTHY" else "idle",
+            "details": f"Instance: {telemetry['instance_id']}, Lag: {telemetry['lag_seconds']}s"
+        }
+
     async def get_overall_health(self) -> Dict[str, Any]:
         db_res = await self.check_database()
         storage_res = await self.check_storage()
         ffmpeg_res = await self.check_ffmpeg()
         redis_res = await self.check_redis()
         ai_res = self.check_ai_providers()
+        scheduler_res = self.check_scheduler()
 
         components = {
             "database": db_res,
             "storage": storage_res,
             "ffmpeg": ffmpeg_res,
             "redis": redis_res,
-            "ai": ai_res
+            "ai": ai_res,
+            "scheduler": scheduler_res
         }
 
         # Overall status is healthy if critical services (db & storage) are healthy

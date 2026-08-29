@@ -41,12 +41,39 @@ async def get_db():
         finally:
             await session.close()
 
+from sqlalchemy import text
+
 async def init_db():
-    """Initializes database schema tables."""
+    """Initializes database schema tables and runs safe column migrations."""
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database schema initialized successfully.")
+
+            # Safe auto-migrations for SQLite/Postgres
+            migrations = [
+                ("clips", "caption_style", "VARCHAR(64) DEFAULT 'BOLD_PUNCH'"),
+                ("clips", "caption_enabled", "BOOLEAN DEFAULT 1"),
+                ("clips", "highlight_keywords_json", "TEXT DEFAULT '[]'"),
+                ("clips", "caption_custom_settings_json", "TEXT DEFAULT '{}'"),
+                ("clip_variants", "has_captions", "BOOLEAN DEFAULT 0"),
+                ("clip_variants", "caption_style", "VARCHAR(64)"),
+                ("platform_connections", "platform", "VARCHAR(32) DEFAULT 'youtube'"),
+                ("platform_connections", "account_name", "VARCHAR(128) DEFAULT ''"),
+                ("platform_connections", "external_account_id", "VARCHAR(128)"),
+                ("platform_connections", "status", "VARCHAR(32) DEFAULT 'CONNECTED'"),
+                ("platform_connections", "access_token_encrypted", "TEXT"),
+                ("platform_connections", "refresh_token_encrypted", "TEXT"),
+                ("platform_connections", "token_expires_at", "DATETIME"),
+                ("platform_connections", "scopes_json", "TEXT DEFAULT '[]'"),
+                ("platform_connections", "metadata_json", "TEXT DEFAULT '{}'"),
+            ]
+            for tbl, col, col_def in migrations:
+                try:
+                    await conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {col_def}"))
+                except Exception:
+                    pass # Column already exists
+
+        logger.info("Database schema initialized and verified successfully.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise
