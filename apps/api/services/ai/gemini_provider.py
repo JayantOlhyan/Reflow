@@ -103,3 +103,31 @@ class GeminiProvider(BaseAIProvider):
         )
         response = await model.generate_content_async(prompt)
         return json.loads(response.text)
+
+    async def discover_clips(
+        self,
+        title: str,
+        transcript_text: str,
+        segments: List[Dict[str, Any]],
+        brief: Optional[Dict[str, Any]] = None,
+        min_duration: float = 15.0,
+        max_duration: float = 90.0,
+        target_count: int = 5
+    ) -> Dict[str, Any]:
+        import google.generativeai as genai
+        genai.configure(api_key=self.api_key)
+        model = genai.GenerativeModel(self.model_name, generation_config={"response_mime_type": "application/json"})
+
+        prompt = (
+            "You are an expert video editor. Analyze the timestamped segments and ContentBrief to discover the top standalone short-form clips.\n"
+            f"Title: {title}\n"
+            f"Duration Range: {min_duration}s to {max_duration}s\n"
+            f"Target Count: {target_count}\n"
+            f"Brief: {json.dumps(brief or {})}\n"
+            f"Segments: {json.dumps(segments[:100])}\n\n"
+            "Return JSON matching:\n"
+            '{"candidates": [{"title": "...", "start_time": 10.0, "end_time": 40.0, "reason": "...", "hook": "...", "score": 90.0, "source_segment_ids": ["..."]}]}'
+        )
+        response = await model.generate_content_async(prompt)
+        return json.loads(response.text)
+

@@ -77,3 +77,35 @@ class BaseAIProvider(ABC):
             }
         """
         pass
+
+    @abstractmethod
+    async def discover_clips(
+        self,
+        title: str,
+        transcript_text: str,
+        segments: List[Dict[str, Any]],
+        brief: Optional[Dict[str, Any]] = None,
+        min_duration: float = 15.0,
+        max_duration: float = 90.0,
+        target_count: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Discovers high-impact short-form clip candidate intervals (15–90s)
+        based on transcript segments and ContentBrief.
+        Returns:
+            {
+                "candidates": [
+                    {
+                        "title": str,
+                        "start_time": float,
+                        "end_time": float,
+                        "reason": str,
+                        "hook": str,
+                        "score": float,
+                        "source_segment_ids": List[str]
+                    }
+                ]
+            }
+        """
+        pass
+

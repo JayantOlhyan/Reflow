@@ -8,12 +8,12 @@ from config import settings
 from database import async_session_factory
 from models.entities import (
     Content, Asset, Transcript, TranscriptSegment, ContentBrief, 
-    GeneratedContent, Carousel, CarouselSlide, SlideElement
+    GeneratedContent, Carousel, CarouselSlide, SlideElement, Clip, ClipVariant
 )
 from models.schemas import (
     ContentBriefSchema, LinkedInPostSchema, InstagramPostSchema,
     XThreadPostSchema, XPostSchema, YouTubePostSchema,
-    CarouselPlanSchema
+    CarouselPlanSchema, ClipCandidateSchema, ClipCandidateListSchema
 )
 from services.ai.base_provider import BaseAIProvider
 from services.ai.mock_provider import MockAIProvider
@@ -397,5 +397,196 @@ class AIService:
             await session.commit()
             logger.info(f"Successfully saved {len(validated_plan.slides)} slides for Carousel {carousel_id} (Version {carousel.version}).")
             return carousel
+
+    async def discover_and_persist_clips(
+        self,
+        content_id: str,
+        min_duration: float = 15.0,
+        max_duration: float = 90.0,
+        target_count: int = 5,
+        force_refresh: bool = False
+    ) -> List[Clip]:
+        """
+        Discovers high-impact short-form clip candidate intervals:
+        1. Loads Transcript segments and ContentBrief
+        2. Queries AI Provider for candidates
+        3. Validates via ClipCandidateListSchema
+        4. Aligns & snaps boundaries to transcript segment timestamps
+        5. Computes multi-factor ranking score & suppresses overlapping duplicates
+        6. Persists candidate Clip records
+        """
+        provider = self.get_provider()
+        logger.info(f"Discovering clips for Content {content_id} using {provider.provider_name}...")
+
+        async with async_session_factory() as session:
+            # 1. Fetch Content, Asset, Transcript, ContentBrief
+            content_res = await session.execute(select(Content).where(Content.id == content_id))
+            content = content_res.scalar_one_or_none()
+            if not content:
+                raise ValueError(f"Content {content_id} not found.")
+
+            source_asset = content.assets[0] if content.assets else None
+            max_content_duration = float(source_asset.duration) if source_asset and source_asset.duration else 3600.0
+
+            t_res = await session.execute(select(Transcript).where(Transcript.content_id == content_id))
+            transcript = t_res.scalar_one_or_none()
+            if not transcript or not transcript.segments:
+                raise ValueError(f"No transcript segments found for Content {content_id}.")
+
+            b_res = await session.execute(select(ContentBrief).where(ContentBrief.content_id == content_id))
+            brief = b_res.scalar_one_or_none()
+            brief_dict = {
+                "title": brief.title,
+                "summary": brief.summary,
+                "key_points": brief.key_points,
+                "hooks": brief.hooks,
+                "quotes": brief.quotes
+            } if brief else {}
+
+            segments_data = [
+                {
+                    "id": seg.id,
+                    "sequence": seg.sequence,
+                    "start_time": seg.start_time,
+                    "end_time": seg.end_time,
+                    "text": seg.text
+                }
+                for seg in sorted(transcript.segments, key=lambda s: s.start_time)
+            ]
+
+            # 2. Query AI Provider
+            raw_result = await provider.discover_clips(
+                title=content.title,
+                transcript_text=transcript.text,
+                segments=segments_data,
+                brief=brief_dict,
+                min_duration=min_duration,
+                max_duration=max_duration,
+                target_count=target_count
+            )
+
+            # 3. Schema validation
+            validated = ClipCandidateListSchema.model_validate(raw_result)
+
+            # 4. Snap boundaries to segment timestamps & build processed candidates
+            processed_candidates = []
+            for cand in validated.candidates:
+                cand_st = max(0.0, float(cand.start_time))
+                cand_et = min(max_content_duration, float(cand.end_time))
+
+                # Find nearest segment start
+                closest_start = cand_st
+                min_st_diff = 3.5
+                for seg in segments_data:
+                    diff = abs(seg["start_time"] - cand_st)
+                    if diff < min_st_diff:
+                        min_st_diff = diff
+                        closest_start = seg["start_time"]
+
+                # Find nearest segment end
+                closest_end = cand_et
+                min_et_diff = 3.5
+                for seg in segments_data:
+                    diff = abs(seg["end_time"] - cand_et)
+                    if diff < min_et_diff:
+                        min_et_diff = diff
+                        closest_end = seg["end_time"]
+
+                snapped_st = round(closest_start, 2)
+                snapped_et = round(max(snapped_st + min_duration, closest_end), 2)
+                if snapped_et > max_content_duration:
+                    snapped_et = round(max_content_duration, 2)
+                
+                dur = round(snapped_et - snapped_st, 2)
+                if dur < min_duration or snapped_st >= snapped_et:
+                    continue
+
+                # Collect transcript excerpt
+                matching_seg_texts = [
+                    seg["text"] for seg in segments_data
+                    if seg["end_time"] >= snapped_st and seg["start_time"] <= snapped_et
+                ]
+                excerpt = " ".join(matching_seg_texts).strip()
+
+                matched_seg_ids = [
+                    seg["id"] for seg in segments_data
+                    if seg["end_time"] >= snapped_st and seg["start_time"] <= snapped_et
+                ]
+
+                # 5. Deterministic Ranking Score
+                # Factors: base score (40%), duration fitness (20%), hook strength (20%), segment alignment (20%)
+                base_s = float(cand.score) * 0.4
+                dur_s = 20.0 if (20.0 <= dur <= 60.0) else (15.0 if (15.0 <= dur <= 90.0) else 10.0)
+                hook_s = 20.0 if cand.hook and len(cand.hook.strip()) > 10 else 10.0
+                align_s = 20.0 if min_st_diff < 1.0 else 15.0
+                final_score = round(min(100.0, max(50.0, base_s + dur_s + hook_s + align_s)), 1)
+
+                processed_candidates.append({
+                    "title": cand.title.strip(),
+                    "start_time": snapped_st,
+                    "end_time": snapped_et,
+                    "duration": dur,
+                    "reason": cand.reason.strip(),
+                    "hook": cand.hook.strip(),
+                    "score": final_score,
+                    "source_segment_ids": matched_seg_ids,
+                    "transcript_excerpt": excerpt
+                })
+
+            # 6. Overlap Suppression (Non-Maximum Suppression)
+            processed_candidates.sort(key=lambda x: x["score"], reverse=True)
+            accepted_candidates = []
+            for cand in processed_candidates:
+                is_overlap = False
+                for acc in accepted_candidates:
+                    overlap_start = max(cand["start_time"], acc["start_time"])
+                    overlap_end = min(cand["end_time"], acc["end_time"])
+                    if overlap_end > overlap_start:
+                        overlap_dur = overlap_end - overlap_start
+                        overlap_ratio = overlap_dur / min(cand["duration"], acc["duration"])
+                        if overlap_ratio > 0.6:
+                            is_overlap = True
+                            break
+                if not is_overlap:
+                    accepted_candidates.append(cand)
+                if len(accepted_candidates) >= target_count:
+                    break
+
+            # 7. Persist to Database
+            if force_refresh:
+                # Delete existing CANDIDATE clips
+                old_clips_res = await session.execute(
+                    select(Clip).where(Clip.content_id == content_id, Clip.status == "CANDIDATE")
+                )
+                for old_c in old_clips_res.scalars().all():
+                    await session.delete(old_c)
+
+            persisted_clips = []
+            for item in accepted_candidates:
+                clip_id = f"clp_{uuid.uuid4().hex[:12]}"
+                clip_entity = Clip(
+                    id=clip_id,
+                    content_id=content_id,
+                    source_asset_id=source_asset.id if source_asset else None,
+                    title=item["title"],
+                    description=item["reason"],
+                    hook=item["hook"],
+                    start_time=item["start_time"],
+                    end_time=item["end_time"],
+                    duration=item["duration"],
+                    status="CANDIDATE",
+                    score=item["score"],
+                    reason=item["reason"],
+                    source_transcript_segment_ids_json=json.dumps(item["source_segment_ids"]),
+                    transcript_excerpt=item["transcript_excerpt"],
+                    discovery_version="v1",
+                    created_at=datetime.utcnow()
+                )
+                session.add(clip_entity)
+                persisted_clips.append(clip_entity)
+
+            await session.commit()
+            logger.info(f"Persisted {len(persisted_clips)} candidate clips for Content {content_id}.")
+            return persisted_clips
 
 ai_service = AIService()

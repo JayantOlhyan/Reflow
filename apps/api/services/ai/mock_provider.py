@@ -221,3 +221,77 @@ class MockAIProvider(BaseAIProvider):
             "template": template.upper(),
             "slides": slides
         }
+
+    async def discover_clips(
+        self,
+        title: str,
+        transcript_text: str,
+        segments: List[Dict[str, Any]],
+        brief: Optional[Dict[str, Any]] = None,
+        min_duration: float = 15.0,
+        max_duration: float = 90.0,
+        target_count: int = 5
+    ) -> Dict[str, Any]:
+        """Returns deterministic, timestamp-aligned clip candidates."""
+        candidates = []
+        hooks = brief.get("hooks", []) if brief else [
+            "Why most AI automation projects fail before launch",
+            "The architecture secrets of high-performance media transcoding",
+            "Stop manually resizing your content for every platform"
+        ]
+        key_points = brief.get("key_points", []) if brief else [
+            "Decouple heavy video encoding from synchronous HTTP requests",
+            "Structured briefs ensure the core thesis is never lost",
+            "Aspect ratio conversion eliminates manual editing"
+        ]
+
+        if segments and len(segments) >= 2:
+            seg_count = len(segments)
+            step = max(1, seg_count // target_count)
+            for idx in range(0, seg_count, step):
+                if len(candidates) >= target_count:
+                    break
+                s_seg = segments[idx]
+                e_idx = min(seg_count - 1, idx + max(1, int(step * 0.8)))
+                e_seg = segments[e_idx]
+
+                s_time = float(s_seg.get("start_time", 0.0))
+                e_time = float(e_seg.get("end_time", s_time + 30.0))
+                dur = e_time - s_time
+                if dur < min_duration:
+                    e_time = s_time + min_duration
+                elif dur > max_duration:
+                    e_time = s_time + max_duration
+
+                hook_text = hooks[len(candidates) % len(hooks)] if hooks else s_seg.get("text", "Engaging opening hook")
+                cand_title = f"{title}: {key_points[len(candidates) % len(key_points)][:35]}" if key_points else f"Highlight #{len(candidates)+1}"
+                matched_seg_ids = [str(s.get("id") or f"seg_{i}") for i, s in enumerate(segments[idx:e_idx+1])]
+
+                candidates.append({
+                    "title": cand_title,
+                    "start_time": round(s_time, 2),
+                    "end_time": round(e_time, 2),
+                    "reason": "High emotional resonance with actionable technical walkthrough and complete thought.",
+                    "hook": hook_text[:120],
+                    "score": round(88.0 - (len(candidates) * 2.5), 1),
+                    "source_segment_ids": matched_seg_ids
+                })
+        else:
+            base_times = [
+                (0.0, 25.0, "Why content repurposing is broken", "Stop wasting hours on manual editing"),
+                (26.0, 58.0, "The unified transformation architecture", "Here is how to create once and transform everywhere"),
+                (60.0, 90.0, "FFmpeg asynchronous variant pipeline", "Transcode 9:16 and 1:1 without blocking your server")
+            ]
+            for i, (st, et, t_title, hk) in enumerate(base_times[:target_count]):
+                candidates.append({
+                    "title": t_title,
+                    "start_time": st,
+                    "end_time": et,
+                    "reason": "Clear standalone takeaway with high value for developer and creator audiences.",
+                    "hook": hk,
+                    "score": 85.0 - (i * 3.0),
+                    "source_segment_ids": [f"seg_{i}"]
+                })
+
+        return {"candidates": candidates}
+

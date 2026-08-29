@@ -166,3 +166,55 @@ class OpenAIProvider(BaseAIProvider):
         )
         content_str = response.choices[0].message.content or "{}"
         return json.loads(content_str)
+
+    async def discover_clips(
+        self,
+        title: str,
+        transcript_text: str,
+        segments: List[Dict[str, Any]],
+        brief: Optional[Dict[str, Any]] = None,
+        min_duration: float = 15.0,
+        max_duration: float = 90.0,
+        target_count: int = 5
+    ) -> Dict[str, Any]:
+        client = AsyncOpenAI(api_key=self.api_key)
+
+        system_prompt = (
+            "You are an expert video editor and short-form clip curator. "
+            "Analyze the timestamped transcript and ContentBrief to discover the most engaging, high-value, standalone clips (15–90 seconds). "
+            "Return valid JSON matching this schema:\n"
+            "{\n"
+            '  "candidates": [\n'
+            '    {\n'
+            '      "title": "Clear punchy title",\n'
+            '      "start_time": 12.5,\n'
+            '      "end_time": 45.0,\n'
+            '      "reason": "Why this moment is high-impact",\n'
+            '      "hook": "Opening hook or statement",\n'
+            '      "score": 92.0,\n'
+            '      "source_segment_ids": ["seg_1", "seg_2"]\n'
+            '    }\n'
+            '  ]\n'
+            "}"
+        )
+
+        user_content = (
+            f"Title: {title}\n"
+            f"Allowed Duration Range: {min_duration}s to {max_duration}s\n"
+            f"Target Candidate Count: {target_count}\n"
+            f"Content Brief:\n{json.dumps(brief or {}, indent=2)}\n\n"
+            f"=== UNTRUSTED TIMESTAMPED SEGMENTS ===\n{json.dumps(segments[:100], indent=2)}"
+        )
+
+        response = await client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2
+        )
+        content_str = response.choices[0].message.content or "{}"
+        return json.loads(content_str)
+
