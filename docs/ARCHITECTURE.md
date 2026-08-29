@@ -60,7 +60,7 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 - **Framework**: FastAPI with async route handlers and standard error envelopes.
 - **Carousel API**: Full CRUD (`/api/carousels`), slide operations (`/api/carousels/{id}/slides`), slide reordering (`/api/carousels/{id}/slides/reorder`), async AI generation (`/api/carousels/{id}/generate`), and server-side rendering (`/api/carousels/{id}/render`).
 
-### 2.3 Media & AI Worker Subsystem (`apps/api/worker.py`)
+### 2.3 Media, AI, & Clip Worker Subsystem (`apps/api/worker.py`)
 - **Queue**: Redis list queue (`reflow:media_jobs`) with in-process fallback.
 - **Worker Pipeline**:
   - `MEDIA_PROCESSING`: Aspect-ratio transcoding + thumbnails.
@@ -69,12 +69,20 @@ Reflow is an open-source, self-hosted content operating system for creators and 
   - `CONTENT_GENERATION`: Platform copies for LinkedIn, Instagram, X, and YouTube.
   - `CAROUSEL_GENERATION`: AI slide deck planning + server-side rendering.
   - `CAROUSEL_RENDER`: Server-side rasterization of 1080x1080 PNG slides and multi-page PDF compilation.
+  - `CLIP_DISCOVERY`: AI transcript boundary snapping, scoring, and candidate moment discovery.
+  - `CLIP_RENDER`: Frame-accurate subclip extraction, validation, and multi-ratio variant transcoding.
 
-### 2.4 Server-Side Carousel Rendering Engine (`apps/api/services/carousel_renderer.py`)
+### 2.4 Intelligent Clip Engine (`apps/api/services/media_service.py` & `ai_service.py`)
+- **Moment Discovery**: Boundary snapping to transcript segments ($\pm 3.5\text{s}$), non-maximum overlap suppression (Jaccard IoU $> 0.6$), and 50–100 multi-factor quality scoring.
+- **Frame-Accurate Video Extraction**: Standardized FFmpeg sub-clipping (`-avoid_negative_ts make_zero -movflags +faststart`) and FFprobe validation.
+- **Aspect-Ratio Variants**: Real video transcoding into `9:16` (1080x1920), `1:1` (1080x1080), `4:5` (1080x1350), and `16:9` (1920x1080) with centered thumbnail frame extraction.
+- **Storage**: Organized under `content/{content_id}/clips/{clip_id}/variants/{ratio}.mp4` with secure streaming via `/api/clips/{id}/variant/{var_id}` and `/api/clips/{id}/stream`.
+
+### 2.5 Server-Side Carousel Rendering Engine (`apps/api/services/carousel_renderer.py`)
 - **Design System**: 4 deterministic styling themes with controlled typography scale, contrast ratios, and pagination chips.
 - **Rasterizer**: Produces high-resolution 1080x1080 PNG slide images and compiles standard multi-page PDF documents.
 - **Storage**: Persistent storage under `content/{content_id}/carousels/{carousel_id}/` with secure streaming via `/api/carousels/{id}/export/{export_id}`.
 
-### 2.5 Database Layer (`apps/api/database.py`)
+### 2.6 Database Layer (`apps/api/database.py`)
 - **Engine**: SQLAlchemy Async engine supporting SQLite (development) and PostgreSQL (production).
-- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Job`, `SystemLog`.
+- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Clip`, `ClipVariant`, `Job`, `SystemLog`.
