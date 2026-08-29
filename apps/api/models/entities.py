@@ -23,6 +23,7 @@ class Content(Base):
     briefs = relationship("ContentBrief", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
     generated_contents = relationship("GeneratedContent", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
     carousels = relationship("Carousel", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
+    clips = relationship("Clip", back_populates="content", cascade="all, delete-orphan", lazy="selectin")
 
 class Asset(Base):
     __tablename__ = "assets"
@@ -245,6 +246,58 @@ class CarouselExport(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     carousel = relationship("Carousel", back_populates="exports")
+
+# ------------------------------------------------------------------------------
+# Phase 5 Intelligent Clip Engine Entities
+# ------------------------------------------------------------------------------
+
+class Clip(Base):
+    __tablename__ = "clips"
+
+    id = Column(String(64), primary_key=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_asset_id = Column(String(64), nullable=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, default="")
+    hook = Column(String(512), default="")
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+    duration = Column(Float, nullable=False)
+    status = Column(String(32), default="CANDIDATE", index=True)   # CANDIDATE, SELECTED, PROCESSING, READY, FAILED
+    score = Column(Float, default=80.0)
+    reason = Column(Text, default="")
+    source_transcript_segment_ids_json = Column(Text, default="[]")
+    transcript_excerpt = Column(Text, default="")
+    thumbnail_path = Column(String(512), nullable=True)
+    discovery_version = Column(String(32), default="v1")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    content = relationship("Content", back_populates="clips")
+    variants = relationship("ClipVariant", back_populates="clip", cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def source_transcript_segment_ids(self):
+        try: return json.loads(self.source_transcript_segment_ids_json)
+        except: return []
+
+class ClipVariant(Base):
+    __tablename__ = "clip_variants"
+
+    id = Column(String(64), primary_key=True, index=True)
+    clip_id = Column(String(64), ForeignKey("clips.id", ondelete="CASCADE"), nullable=False, index=True)
+    variant_type = Column(String(64), nullable=False, index=True)  # MASTER, VERTICAL_9_16, SQUARE_1_1, PORTRAIT_4_5, LANDSCAPE_16_9, THUMBNAIL
+    aspect_ratio = Column(String(16), default="9:16")              # 9:16, 1:1, 4:5, 16:9
+    storage_key = Column(String(512), nullable=False)
+    mime_type = Column(String(128), default="video/mp4")
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    duration = Column(Float, nullable=True)
+    file_size = Column(Integer, default=0)
+    status = Column(String(32), default="READY", index=True)       # QUEUED, PROCESSING, READY, FAILED
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    clip = relationship("Clip", back_populates="variants")
 
 class PlatformConnection(Base):
     __tablename__ = "platform_connections"

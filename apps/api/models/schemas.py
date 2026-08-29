@@ -265,6 +265,81 @@ class CarouselGenerateRequest(BaseModel):
     tone: Optional[str] = "informative"
     custom_prompt: Optional[str] = None
 
+# ------------------------------------------------------------------------------
+# Phase 5 Intelligent Clip Engine Schemas
+# ------------------------------------------------------------------------------
+
+class ClipCandidateSchema(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255, description="Punchy, descriptive clip title")
+    start_time: float = Field(..., ge=0, description="Start timestamp in seconds")
+    end_time: float = Field(..., gt=0, description="End timestamp in seconds")
+    reason: str = Field(default="", description="Why this segment is engaging and high-value")
+    hook: str = Field(default="", description="Opening statement or hook of the clip")
+    score: float = Field(default=80.0, ge=0.0, le=100.0, description="Ranking quality score")
+    source_segment_ids: List[str] = Field(default_factory=list, description="IDs of source transcript segments")
+
+class ClipCandidateListSchema(BaseModel):
+    candidates: List[ClipCandidateSchema] = Field(..., description="List of recommended clip candidate intervals")
+
+class ClipVariantResponse(BaseModel):
+    id: str
+    clip_id: str
+    variant_type: str
+    aspect_ratio: str
+    storage_key: str
+    mime_type: str = "video/mp4"
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration: Optional[float] = None
+    file_size: int = 0
+    status: str
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ClipResponse(BaseModel):
+    id: str
+    content_id: str
+    source_asset_id: Optional[str] = None
+    title: str
+    description: Optional[str] = ""
+    hook: Optional[str] = ""
+    start_time: float
+    end_time: float
+    duration: float
+    status: str
+    score: float = 80.0
+    reason: Optional[str] = ""
+    source_transcript_segment_ids: List[str] = []
+    transcript_excerpt: Optional[str] = ""
+    thumbnail_path: Optional[str] = None
+    discovery_version: str = "v1"
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    variants: List[ClipVariantResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ClipListResponse(BaseModel):
+    items: List[ClipResponse]
+    total: int
+
+class ClipDiscoveryRequest(BaseModel):
+    min_duration: Optional[float] = 15.0
+    max_duration: Optional[float] = 90.0
+    target_count: Optional[int] = 5
+    force_refresh: Optional[bool] = False
+
+class ClipUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    hook: Optional[str] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+
+class ClipGenerateRequest(BaseModel):
+    aspect_ratios: List[str] = Field(default=["9:16"])
+    include_thumbnail: bool = True
+
 class ContentResponse(BaseModel):
     id: str
     title: str
@@ -280,6 +355,7 @@ class ContentResponse(BaseModel):
     briefs: List[ContentBriefResponse] = []
     generated_contents: List[GeneratedContentResponse] = []
     carousels: List[CarouselResponse] = []
+    clips: List[ClipResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 

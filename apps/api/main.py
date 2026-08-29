@@ -19,7 +19,7 @@ from database import get_db, init_db
 from models.entities import (
     Content, Asset, ContentVariant, Transcript, TranscriptSegment,
     ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
-    PlatformConnection, Workflow, Job, SystemLog
+    Clip, ClipVariant, PlatformConnection, Workflow, Job, SystemLog
 )
 from models.schemas import (
     ContentResponse, ContentListResponse, TextContentCreateRequest,
@@ -28,13 +28,16 @@ from models.schemas import (
     PlatformConnectionSchema, PlatformConnectionUpdate, HealthResponse, ApiResponse,
     JobResponse, CarouselResponse, CarouselListResponse, CarouselCreateRequest,
     CarouselUpdateRequest, SlideCreateRequest, SlideUpdateRequest, SlideReorderRequest,
-    CarouselGenerateRequest, CarouselExportResponse
+    CarouselGenerateRequest, CarouselExportResponse,
+    ClipResponse, ClipListResponse, ClipDiscoveryRequest, ClipUpdateRequest,
+    ClipGenerateRequest, ClipVariantResponse
 )
 from services.media_service import media_processor
 from services.queue_service import queue_service
 from services.ai_service import ai_service
 from services.carousel_renderer import carousel_renderer
 from services.carousel_helper import fetch_full_carousel
+from services.clip_helper import fetch_full_clip, fetch_content_clips
 from services.health_service import health_service
 from services.storage_service import storage_service, validate_upload, generate_storage_key
 from utils.logging import get_logger
@@ -355,6 +358,14 @@ async def delete_content(content_id: str, db: AsyncSession = Depends(get_db)):
     for carousel in content.carousels:
         for export in carousel.exports:
             try: await storage_service.delete(export.storage_key)
+            except Exception: pass
+
+    for clip in content.clips:
+        for c_var in clip.variants:
+            try: await storage_service.delete(c_var.storage_key)
+            except Exception: pass
+        if clip.thumbnail_path:
+            try: await storage_service.delete(clip.thumbnail_path)
             except Exception: pass
 
     await db.delete(content)
@@ -763,6 +774,189 @@ async def generate_repurpose(req: RepurposeRequest, db: AsyncSession = Depends(g
         "target_format": req.target_format,
         "outputs": outputs
     }
+
+# ------------------------------------------------------------------------------
+# Phase 5 Intelligent Clip Engine API
+# ------------------------------------------------------------------------------
+
+@app.post("/api/content/{content_id}/clips/discover", response_model=ApiResponse, tags=["Clips"])
+async def discover_content_clips(
+    content_id: str,
+    req: ClipDiscoveryRequest = ClipDiscoveryRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    content = res.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found.")
+
+    if content.content_type != "VIDEO":
+        raise HTTPException(status_code=400, detail="Clip discovery is only supported for video content.")
+
+    # Enqueue background job
+    job_id = f"job_clip_disc_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        content_id=content_id,
+        type="CLIP_DISCOVERY",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        content_id=content_id,
+        asset_id=None,
+        job_type="CLIP_DISCOVERY",
+        min_duration=req.min_duration,
+        max_duration=req.max_duration,
+        target_count=req.target_count,
+        force_refresh=req.force_refresh
+    )
+
+    logger.info(f"Enqueued CLIP_DISCOVERY job {job_id} for Content {content_id}.")
+    return ApiResponse(status="success", message=f"Clip discovery queued (Job {job_id}).")
+
+@app.get("/api/content/{content_id}/clips", response_model=ClipListResponse, tags=["Clips"])
+async def list_content_clips(content_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Content).where(Content.id == content_id))
+    content = res.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found.")
+
+    clips = await fetch_content_clips(db, content_id)
+    return {
+        "items": [ClipResponse.model_validate(c) for c in clips],
+        "total": len(clips)
+    }
+
+@app.get("/api/clips/{clip_id}", response_model=ClipResponse, tags=["Clips"])
+async def get_clip(clip_id: str, db: AsyncSession = Depends(get_db)):
+    clip = await fetch_full_clip(db, clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    return ClipResponse.model_validate(clip)
+
+@app.put("/api/clips/{clip_id}", response_model=ClipResponse, tags=["Clips"])
+async def update_clip(clip_id: str, req: ClipUpdateRequest, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Clip).where(Clip.id == clip_id))
+    clip = res.scalar_one_or_none()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+
+    if req.title is not None:
+        clip.title = req.title.strip()
+    if req.hook is not None:
+        clip.hook = req.hook.strip()
+    if req.start_time is not None:
+        if req.start_time < 0:
+            raise HTTPException(status_code=400, detail="Start time cannot be negative.")
+        clip.start_time = float(req.start_time)
+    if req.end_time is not None:
+        if req.end_time <= clip.start_time:
+            raise HTTPException(status_code=400, detail="End time must be greater than start time.")
+        clip.end_time = float(req.end_time)
+
+    clip.duration = round(clip.end_time - clip.start_time, 2)
+    clip.updated_at = datetime.utcnow()
+    await db.commit()
+
+    full_clip = await fetch_full_clip(db, clip_id)
+    return ClipResponse.model_validate(full_clip)
+
+@app.post("/api/clips/{clip_id}/generate", response_model=ApiResponse, tags=["Clips"])
+async def generate_clip(
+    clip_id: str,
+    req: ClipGenerateRequest = ClipGenerateRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(Clip).where(Clip.id == clip_id))
+    clip = res.scalar_one_or_none()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+
+    clip.status = "PROCESSING"
+    await db.commit()
+
+    # Enqueue background job
+    job_id = f"job_clip_rnd_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        content_id=clip.content_id,
+        type="CLIP_RENDER",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        content_id=clip.content_id,
+        asset_id=clip.source_asset_id,
+        job_type="CLIP_RENDER",
+        clip_id=clip_id,
+        aspect_ratios=req.aspect_ratios,
+        include_thumbnail=req.include_thumbnail
+    )
+
+    logger.info(f"Enqueued CLIP_RENDER job {job_id} for Clip {clip_id}.")
+    return ApiResponse(status="success", message=f"Clip generation queued (Job {job_id}).")
+
+@app.delete("/api/clips/{clip_id}", tags=["Clips"])
+async def delete_clip(clip_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Clip).where(Clip.id == clip_id))
+    clip = res.scalar_one_or_none()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+
+    for var in clip.variants:
+        try: await storage_service.delete(var.storage_key)
+        except Exception: pass
+    if clip.thumbnail_path:
+        try: await storage_service.delete(clip.thumbnail_path)
+        except Exception: pass
+
+    await db.delete(clip)
+    await db.commit()
+    logger.info(f"Deleted Clip {clip_id} and all related physical media variants.")
+    return {"status": "success", "message": f"Clip {clip_id} deleted."}
+
+@app.get("/api/clips/{clip_id}/variant/{variant_id}", tags=["Clips"])
+async def stream_clip_variant(clip_id: str, variant_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ClipVariant).where(ClipVariant.id == variant_id, ClipVariant.clip_id == clip_id)
+    )
+    variant = res.scalar_one_or_none()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Clip variant not found.")
+
+    real_path = storage_service.get_real_path(variant.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail="Clip variant physical file missing.")
+
+    return FileResponse(real_path, media_type=variant.mime_type)
+
+@app.get("/api/clips/{clip_id}/stream", tags=["Clips"])
+async def stream_clip_primary(clip_id: str, db: AsyncSession = Depends(get_db)):
+    clip = await fetch_full_clip(db, clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+
+    target_var = next((v for v in clip.variants if v.variant_type in ["VERTICAL_9_16", "MASTER"]), None)
+    if not target_var and clip.variants:
+        target_var = clip.variants[0]
+
+    if not target_var:
+        raise HTTPException(status_code=404, detail="No media variant available for this clip.")
+
+    real_path = storage_service.get_real_path(target_var.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail="Clip physical media missing.")
+
+    return FileResponse(real_path, media_type=target_var.mime_type)
 
 # ------------------------------------------------------------------------------
 # Platform Connections & Publishing (Phase 5)
