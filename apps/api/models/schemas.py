@@ -7,40 +7,57 @@ class ApiResponse(BaseModel):
     message: Optional[str] = None
     data: Optional[Any] = None
 
+class AssetResponse(BaseModel):
+    id: str
+    content_id: str
+    original_filename: str
+    storage_key: str
+    mime_type: str
+    file_size: int
+    duration: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
 class ContentVariantSchema(BaseModel):
     platform: str
     format: str
-    status: str = "draft"
+    status: str = "DRAFT"
     storage_path: Optional[str] = None
     copy_text: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-class ContentItem(BaseModel):
+class ContentResponse(BaseModel):
     id: str
     title: str
-    type: str  # video, carousel, image, text
-    source: Optional[str] = ""
-    thumbnail: Optional[str] = ""
-    duration: Optional[int] = None
-    slide_count: Optional[int] = None
-    dimensions: Optional[str] = None
-    status: str = "draft"
-    created_at: Optional[str] = None
-    destinations: List[str] = []
+    content_type: str  # VIDEO, IMAGE, PDF, TEXT
+    status: str        # UPLOADING, READY, FAILED
+    text_content: Optional[str] = None
+    thumbnail_path: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    assets: List[AssetResponse] = []
     variants: List[ContentVariantSchema] = []
 
     model_config = ConfigDict(from_attributes=True)
 
+class ContentListResponse(BaseModel):
+    items: List[ContentResponse]
+    total: int
+    page: int
+    limit: int
+
+class TextContentCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    text: str = Field(..., min_length=1)
+
 class ContentCreateRequest(BaseModel):
     title: str
-    type: str = "video"
-    source: Optional[str] = ""
-    thumbnail: Optional[str] = ""
-    duration: Optional[int] = None
-    slide_count: Optional[int] = None
-    dimensions: Optional[str] = None
-    destinations: List[str] = []
+    type: str = "VIDEO"
+    text_content: Optional[str] = None
 
 class RepurposeRequest(BaseModel):
     content_id: str
@@ -116,7 +133,7 @@ class JobSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class HealthComponentStatus(BaseModel):
-    status: str  # healthy | degraded | unavailable | not_configured
+    status: str
     details: Optional[str] = None
 
 class HealthResponse(BaseModel):

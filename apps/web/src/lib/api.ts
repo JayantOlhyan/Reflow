@@ -1,9 +1,9 @@
-import { ContentItem, SocialAccount, Workflow, ScheduledPost, PublishingJob, SystemLog, CarouselDeck } from '@/types';
+import { ContentItem, ContentListResponse, SocialAccount, PublishingJob, SystemLog } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 class ApiClient {
-  private baseUrl: string;
+  public baseUrl: string;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -15,7 +15,6 @@ class ApiClient {
       const response = await fetch(url, {
         ...options,
         headers: {
-          'Content-Type': 'application/json',
           ...(options?.headers || {})
         }
       });
@@ -40,14 +39,35 @@ class ApiClient {
     }>('/api/overview');
   }
 
-  async getContentList(): Promise<ContentItem[]> {
-    return this.request<ContentItem[]>('/api/content');
+  async getContentList(params?: { page?: number; limit?: number; type?: string; status?: string; search?: string }): Promise<ContentListResponse> {
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', params.page.toString());
+    if (params?.limit) query.set('limit', params.limit.toString());
+    if (params?.type && params.type !== 'all') query.set('type', params.type.toUpperCase());
+    if (params?.status) query.set('status', params.status.toUpperCase());
+    if (params?.search) query.set('search', params.search);
+
+    const queryString = query.toString();
+    const endpoint = `/api/content${queryString ? `?${queryString}` : ''}`;
+    return this.request<ContentListResponse>(endpoint);
   }
 
-  async createContent(data: Partial<ContentItem>): Promise<ContentItem> {
-    return this.request<ContentItem>('/api/content', {
+  async uploadFile(file: File, title?: string): Promise<ContentItem> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (title) formData.append('title', title);
+
+    return this.request<ContentItem>('/api/content/upload', {
       method: 'POST',
-      body: JSON.stringify(data)
+      body: formData
+    });
+  }
+
+  async createTextContent(title: string, text: string): Promise<ContentItem> {
+    return this.request<ContentItem>('/api/content/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, text })
     });
   }
 
@@ -57,6 +77,10 @@ class ApiClient {
     });
   }
 
+  getAssetUrl(contentId: string, assetId: string): string {
+    return `${this.baseUrl}/api/content/${contentId}/asset/${assetId}`;
+  }
+
   async generateRepurpose(contentId: string, targetFormat: string, destinations: string[]) {
     return this.request<{
       content_id: string;
@@ -64,6 +88,7 @@ class ApiClient {
       outputs: Record<string, { title: string; caption: string; hashtags: string; format: string }>;
     }>('/api/repurpose/generate', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content_id: contentId, target_format: targetFormat, destinations })
     });
   }
@@ -71,6 +96,7 @@ class ApiClient {
   async generateCarousel(topic: string, slideCount: number = 4) {
     return this.request<{ slides: any[] }>('/api/carousels/generate', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ topic, slide_count: slideCount })
     });
   }
@@ -98,6 +124,7 @@ class ApiClient {
   async publish(platform: string) {
     return this.request<{ status: string; message: string; platform: string }>('/api/publish', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platform })
     });
   }
@@ -105,6 +132,7 @@ class ApiClient {
   async schedule(data: any) {
     return this.request<{ status: string; message: string; platform: string }>('/api/schedule', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
   }
@@ -112,7 +140,6 @@ class ApiClient {
 
 export const api = new ApiClient(API_BASE);
 
-// Legacy helpers for direct component consumption with proper fallback signatures
 export async function fetchOverviewData() {
   try {
     return await api.getOverview();
@@ -123,7 +150,8 @@ export async function fetchOverviewData() {
 
 export async function fetchContentList(): Promise<ContentItem[]> {
   try {
-    return await api.getContentList();
+    const res = await api.getContentList();
+    return res.items || [];
   } catch {
     return [];
   }

@@ -1,62 +1,88 @@
 import os
 import aiofiles
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 from config import settings
 from utils.logging import get_logger
 
 logger = get_logger("StorageService")
 
-ALLOWED_EXTENSIONS = {
-    "mp4", "mov", "avi", "mkv", "webm",
-    "png", "jpg", "jpeg", "webp", "gif",
-    "pdf", "txt", "md"
+EXTENSION_TO_CONTENT_TYPE = {
+    # Video
+    "mp4": "VIDEO",
+    "mov": "VIDEO",
+    "webm": "VIDEO",
+    "mkv": "VIDEO",
+    # Image
+    "jpg": "IMAGE",
+    "jpeg": "IMAGE",
+    "png": "IMAGE",
+    "webp": "IMAGE",
+    # PDF
+    "pdf": "PDF",
+    # Text
+    "txt": "TEXT",
+    "md": "TEXT"
 }
 
-ALLOWED_MIME_PREFIXES = {"video/", "image/", "application/pdf", "text/"}
-MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
+ALLOWED_MIME_PREFIXES = {
+    "video/", "image/", "application/pdf", "text/", "application/octet-stream"
+}
 
-def validate_upload(filename: str, mime_type: str, file_size: int) -> Tuple[bool, Optional[str]]:
-    """Validates file upload extension, MIME type, and size to prevent unsafe uploads."""
+def detect_content_type(filename: str) -> Optional[str]:
     if not filename or "." not in filename:
-        return False, "Invalid filename. File must have an extension."
+        return None
+    ext = filename.rsplit(".", 1)[-1].lower()
+    return EXTENSION_TO_CONTENT_TYPE.get(ext)
+
+def validate_upload(filename: str, mime_type: str, file_size: int) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Multi-layer validation for uploaded file.
+    Returns: (is_valid, content_type_or_none, error_message_or_none)
+    """
+    if not filename or "." not in filename:
+        return False, None, "Invalid filename. File must have an extension."
     
     ext = filename.rsplit(".", 1)[-1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        return False, f"Unsupported file extension '.{ext}'."
+    content_type = EXTENSION_TO_CONTENT_TYPE.get(ext)
+    if not content_type:
+        return False, None, f"Unsupported file extension '.{ext}'. Supported: {', '.join(sorted(EXTENSION_TO_CONTENT_TYPE.keys()))}"
     
-    if not any(mime_type.startswith(prefix) for prefix in ALLOWED_MIME_PREFIXES):
-        return False, f"Unsupported MIME type '{mime_type}'."
+    # MIME validation
+    if mime_type and not any(mime_type.lower().startswith(prefix) for prefix in ALLOWED_MIME_PREFIXES):
+        return False, None, f"Unsupported MIME type '{mime_type}'."
         
-    if file_size > MAX_FILE_SIZE_BYTES:
-        return False, f"File exceeds maximum allowed size of 500MB."
+    # Size validation
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if file_size > max_bytes:
+        return False, None, f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB}MB."
         
-    return True, None
+    return True, content_type, None
+
+def generate_storage_key(content_id: str, asset_id: str, filename: str) -> str:
+    """Generates collision-free, path-safe storage key."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"content/{content_id}/original/{asset_id}.{ext}"
 
 class BaseStorageService(ABC):
     @abstractmethod
     async def put(self, relative_path: str, data: bytes) -> str:
-        """Stores binary data at the specified path and returns the resolved path/key."""
         pass
 
     @abstractmethod
     async def get(self, relative_path: str) -> Optional[bytes]:
-        """Retrieves binary data from the specified path."""
         pass
 
     @abstractmethod
     async def delete(self, relative_path: str) -> bool:
-        """Deletes file at the specified path."""
         pass
 
     @abstractmethod
     async def exists(self, relative_path: str) -> bool:
-        """Checks if file exists at the specified path."""
         pass
 
     @abstractmethod
-    def get_url(self, relative_path: str) -> str:
-        """Returns public or internal accessible URL for the stored asset."""
+    def get_real_path(self, relative_path: str) -> str:
         pass
 
 class LocalStorageService(BaseStorageService):
@@ -65,11 +91,10 @@ class LocalStorageService(BaseStorageService):
         os.makedirs(self.base_dir, exist_ok=True)
 
     def _resolve_safe_path(self, relative_path: str) -> str:
-        """Prevents path traversal by ensuring the target stays within base_dir."""
         clean_path = os.path.normpath(relative_path).lstrip("/")
         full_path = os.path.abspath(os.path.join(self.base_dir, clean_path))
         if not full_path.startswith(self.base_dir):
-            raise ValueError("Access denied: path traversal attempt detected.")
+            raise ValueError(f"Path traversal detected for '{relative_path}'. Access denied.")
         return full_path
 
     async def put(self, relative_path: str, data: bytes) -> str:
@@ -77,8 +102,8 @@ class LocalStorageService(BaseStorageService):
         os.makedirs(os.path.dirname(safe_path), exist_ok=True)
         async with aiofiles.open(safe_path, "wb") as f:
             await f.write(data)
-        logger.info(f"Stored file: {relative_path}")
-        return safe_path
+        logger.info(f"Persisted storage file: {relative_path}")
+        return relative_path
 
     async def get(self, relative_path: str) -> Optional[bytes]:
         safe_path = self._resolve_safe_path(relative_path)
@@ -91,7 +116,7 @@ class LocalStorageService(BaseStorageService):
         safe_path = self._resolve_safe_path(relative_path)
         if os.path.exists(safe_path):
             os.remove(safe_path)
-            logger.info(f"Deleted file: {relative_path}")
+            logger.info(f"Deleted storage file: {relative_path}")
             return True
         return False
 
@@ -99,12 +124,10 @@ class LocalStorageService(BaseStorageService):
         safe_path = self._resolve_safe_path(relative_path)
         return os.path.exists(safe_path)
 
-    def get_url(self, relative_path: str) -> str:
-        clean_rel = relative_path.lstrip("/")
-        return f"/storage/{clean_rel}"
+    def get_real_path(self, relative_path: str) -> str:
+        return self._resolve_safe_path(relative_path)
 
 def get_storage_service() -> BaseStorageService:
-    # Phase 0 defaults cleanly to local filesystem storage
     return LocalStorageService()
 
 storage_service = get_storage_service()

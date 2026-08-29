@@ -1,34 +1,34 @@
 import sys
 import os
+import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Request, status
+from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
-from typing import Dict, Any, List
+from sqlalchemy import select, func, delete, or_
+from typing import Dict, Any, List, Optional
 
 from config import settings
 from database import get_db, init_db
-from models.entities import Content, ContentVariant, PlatformConnection, Workflow, Job, SystemLog
+from models.entities import Content, Asset, ContentVariant, PlatformConnection, Workflow, Job, SystemLog
 from models.schemas import (
-    ContentItem, ContentCreateRequest, RepurposeRequest,
-    AICarouselPrompt, SchedulePostRequest, PlatformConnectionSchema,
-    PlatformConnectionUpdate, HealthResponse, ApiResponse
+    ContentResponse, ContentListResponse, TextContentCreateRequest,
+    RepurposeRequest, AICarouselPrompt, SchedulePostRequest,
+    PlatformConnectionSchema, PlatformConnectionUpdate, HealthResponse, ApiResponse
 )
 from services.media_service import media_processor
 from services.ai_service import ai_service
 from services.health_service import health_service
-from services.storage_service import storage_service, validate_upload
+from services.storage_service import storage_service, validate_upload, generate_storage_key
 from utils.logging import get_logger
 
 logger = get_logger("ReflowAPI")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize Database
     logger.info("Reflow API starting up... Initializing database schema.")
     await init_db()
     yield
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Open-source self-hosted content repurposing engine",
+    description="Open-source self-hosted content operating system",
     lifespan=lifespan
 )
 
@@ -79,7 +79,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health", tags=["System"])
 async def liveness_probe():
-    """Simple liveness probe indicating the HTTP process is running."""
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
@@ -88,9 +87,7 @@ async def liveness_probe():
 
 @app.get("/api/system/health", response_model=HealthResponse, tags=["System"])
 async def system_health_telemetry():
-    """Real active component health check for Database, Storage, FFmpeg, and AI."""
-    health_data = await health_service.get_overall_health()
-    return health_data
+    return await health_service.get_overall_health()
 
 # ------------------------------------------------------------------------------
 # Overview Dashboard Metrics
@@ -98,28 +95,21 @@ async def system_health_telemetry():
 
 @app.get("/api/overview", tags=["Overview"])
 async def get_overview(db: AsyncSession = Depends(get_db)):
-    """Returns genuine overview metrics calculated from database records with NO fake fallbacks."""
-    # Count total content
     total_res = await db.execute(select(func.count(Content.id)))
     total_count = total_res.scalar() or 0
 
-    # Count published content
-    pub_res = await db.execute(select(func.count(Content.id)).where(Content.status == "published"))
+    pub_res = await db.execute(select(func.count(Content.id)).where(Content.status == "READY"))
     published_count = pub_res.scalar() or 0
 
-    # Count scheduled jobs
     sched_res = await db.execute(select(func.count(Job.id)).where(Job.status == "QUEUED"))
     scheduled_count = sched_res.scalar() or 0
 
-    # Count failed jobs
     failed_res = await db.execute(select(func.count(Job.id)).where(Job.status == "FAILED"))
     failed_count = failed_res.scalar() or 0
 
-    # Fetch recent jobs
     recent_jobs_res = await db.execute(select(Job).order_by(Job.created_at.desc()).limit(5))
     recent_jobs = recent_jobs_res.scalars().all()
 
-    # Fetch connections
     conn_res = await db.execute(select(PlatformConnection))
     connections = conn_res.scalars().all()
 
@@ -152,77 +142,192 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
     }
 
 # ------------------------------------------------------------------------------
-# Content Library CRUD
+# Phase 1: Real Content Ingestion & Management
 # ------------------------------------------------------------------------------
 
-@app.get("/api/content", response_model=List[ContentItem], tags=["Content"])
-async def list_content(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Content).order_by(Content.created_at.desc()))
-    items = result.scalars().all()
-    return [
-        ContentItem(
-            id=item.id,
-            title=item.title,
-            type=item.type,
-            source=item.source or "",
-            thumbnail=item.thumbnail or "",
-            duration=item.duration,
-            slide_count=item.slide_count,
-            dimensions=item.dimensions,
-            status=item.status,
-            created_at=item.created_at.strftime("%b %d, %Y") if item.created_at else None,
-            destinations=[],
-            variants=[]
-        )
-        for item in items
-    ]
+@app.post("/api/content/upload", response_model=ContentResponse, tags=["Content"])
+async def upload_content(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Real multipart file upload endpoint for Video, Image, PDF, and Text files.
+    Validates file, generates collision-safe storage key, persists to storage,
+    and creates Content + Asset database records.
+    """
+    filename = file.filename or "uploaded_file"
+    file_bytes = await file.read()
+    file_size = len(file_bytes)
+    mime_type = file.content_type or "application/octet-stream"
 
-@app.post("/api/content", response_model=ContentItem, tags=["Content"])
-async def create_content(req: ContentCreateRequest, db: AsyncSession = Depends(get_db)):
-    new_id = f"cnt-{int(datetime.utcnow().timestamp())}"
+    # Multi-layer validation
+    is_valid, detected_type, error_msg = validate_upload(filename, mime_type, file_size)
+    if not is_valid or not detected_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+
+    content_id = f"cnt_{uuid.uuid4().hex[:12]}"
+    asset_id = f"ast_{uuid.uuid4().hex[:12]}"
+    content_title = title.strip() if title and title.strip() else filename
+
+    storage_key = generate_storage_key(content_id, asset_id, filename)
+
+    # 1. Write to storage
+    try:
+        await storage_service.put(storage_key, file_bytes)
+    except Exception as e:
+        logger.error(f"Storage write failed for {filename}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to persist file to storage.")
+
+    # 2. Persist Content + Asset in Database
+    try:
+        content = Content(
+            id=content_id,
+            title=content_title,
+            content_type=detected_type,
+            status="READY",
+            created_at=datetime.utcnow()
+        )
+        db.add(content)
+
+        asset = Asset(
+            id=asset_id,
+            content_id=content_id,
+            original_filename=filename,
+            storage_key=storage_key,
+            mime_type=mime_type,
+            file_size=file_size,
+            created_at=datetime.utcnow()
+        )
+        db.add(asset)
+
+        await db.commit()
+        await db.refresh(content)
+        logger.info(f"Successfully ingested {detected_type} asset '{filename}' -> Content ID: {content_id}")
+        return content
+    except Exception as e:
+        # Atomic Rollback: Clean up written storage file to prevent orphans
+        logger.error(f"Database error saving {content_id}, rolling back storage: {e}")
+        await storage_service.delete(storage_key)
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database transaction failed during content ingestion.")
+
+@app.post("/api/content/text", response_model=ContentResponse, tags=["Content"])
+async def create_text_content(
+    req: TextContentCreateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Creates a text / markdown content asset directly."""
+    content_id = f"cnt_{uuid.uuid4().hex[:12]}"
     content = Content(
-        id=new_id,
+        id=content_id,
         title=req.title,
-        type=req.type,
-        source=req.source or "",
-        thumbnail=req.thumbnail or "",
-        duration=req.duration,
-        slide_count=req.slide_count,
-        dimensions=req.dimensions,
-        status="draft"
+        content_type="TEXT",
+        status="READY",
+        text_content=req.text,
+        created_at=datetime.utcnow()
     )
     db.add(content)
     await db.commit()
     await db.refresh(content)
-    logger.info(f"Created content asset: {content.id} ({content.title})")
-    
-    return ContentItem(
-        id=content.id,
-        title=content.title,
-        type=content.type,
-        source=content.source,
-        thumbnail=content.thumbnail,
-        duration=content.duration,
-        slide_count=content.slide_count,
-        dimensions=content.dimensions,
-        status=content.status,
-        created_at="Just now",
-        destinations=req.destinations,
-        variants=[]
+    logger.info(f"Created text content asset: {content.id} ({content.title})")
+    return content
+
+@app.get("/api/content", response_model=ContentListResponse, tags=["Content"])
+async def list_content(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists content assets with real database filtering, pagination, and search."""
+    stmt = select(Content)
+    count_stmt = select(func.count(Content.id))
+
+    # Apply filters
+    if type and type.upper() != "ALL":
+        stmt = stmt.where(Content.content_type == type.upper())
+        count_stmt = count_stmt.where(Content.content_type == type.upper())
+
+    if status:
+        stmt = stmt.where(Content.status == status.upper())
+        count_stmt = count_stmt.where(Content.status == status.upper())
+
+    if search:
+        search_filter = or_(
+            Content.title.ilike(f"%{search}%"),
+            Content.text_content.ilike(f"%{search}%")
+        )
+        stmt = stmt.where(search_filter)
+        count_stmt = count_stmt.where(search_filter)
+
+    # Total count
+    total_res = await db.execute(count_stmt)
+    total_count = total_res.scalar() or 0
+
+    # Paginate
+    offset = (page - 1) * limit
+    stmt = stmt.order_by(Content.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(stmt)
+    items = result.scalars().all()
+
+    return ContentListResponse(
+        items=items,
+        total=total_count,
+        page=page,
+        limit=limit
+    )
+
+@app.get("/api/content/{content_id}", response_model=ContentResponse, tags=["Content"])
+async def get_content(content_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Content).where(Content.id == content_id))
+    content = result.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content asset not found.")
+    return content
+
+@app.get("/api/content/{content_id}/asset/{asset_id}", tags=["Content"])
+async def stream_asset(content_id: str, asset_id: str, db: AsyncSession = Depends(get_db)):
+    """Safely streams an asset file with proper MIME type headers."""
+    result = await db.execute(select(Asset).where(Asset.id == asset_id, Asset.content_id == content_id))
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset file not found.")
+
+    real_path = storage_service.get_real_path(asset.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Storage file missing from disk.")
+
+    return FileResponse(
+        path=real_path,
+        media_type=asset.mime_type,
+        filename=asset.original_filename
     )
 
 @app.delete("/api/content/{content_id}", response_model=ApiResponse, tags=["Content"])
 async def delete_content(content_id: str, db: AsyncSession = Depends(get_db)):
+    """Deletes Content record and its physical storage files safely."""
     result = await db.execute(select(Content).where(Content.id == content_id))
     content = result.scalar_one_or_none()
     if not content:
-        raise HTTPException(status_code=404, detail="Content item not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content asset not found.")
+
+    # Delete physical assets from storage
+    for asset in content.assets:
+        try:
+            await storage_service.delete(asset.storage_key)
+        except Exception as e:
+            logger.warn(f"Could not delete physical file {asset.storage_key}: {e}")
+
     await db.delete(content)
     await db.commit()
-    return ApiResponse(status="success", message=f"Content {content_id} deleted successfully.")
+    logger.info(f"Deleted Content {content_id} and cleaned up related storage files.")
+    return ApiResponse(status="success", message=f"Content {content_id} and associated assets deleted.")
 
 # ------------------------------------------------------------------------------
-# Repurposing & AI Transformation
+# Repurposing & AI Platform Outputs (BYOK)
 # ------------------------------------------------------------------------------
 
 @app.post("/api/repurpose/generate", tags=["Repurpose"])
@@ -257,7 +362,7 @@ async def generate_carousel_deck(prompt: AICarouselPrompt):
     return {"slides": slides}
 
 # ------------------------------------------------------------------------------
-# Platform Connections & Publishing (Explicit Not Implemented in Phase 0)
+# Platform Connections & Publishing (Phase 5)
 # ------------------------------------------------------------------------------
 
 @app.get("/api/connections", tags=["Connections"])
@@ -275,7 +380,6 @@ async def list_connections():
 
 @app.post("/api/publish", tags=["Publishing"])
 async def publish_content(platform: str):
-    """Explicitly returns not_implemented in Phase 0."""
     return {
         "status": "not_implemented",
         "platform": platform,
@@ -285,7 +389,6 @@ async def publish_content(platform: str):
 
 @app.post("/api/schedule", tags=["Publishing"])
 async def schedule_content(req: SchedulePostRequest):
-    """Explicitly returns not_implemented in Phase 0."""
     return {
         "status": "not_implemented",
         "platform": req.platform,

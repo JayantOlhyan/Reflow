@@ -1,27 +1,46 @@
-export type ContentType = 'video' | 'carousel' | 'image' | 'text';
-export type ContentStatus = 'draft' | 'processing' | 'scheduled' | 'published' | 'failed';
+export type ContentType = 'VIDEO' | 'IMAGE' | 'PDF' | 'TEXT' | 'CAROUSEL' | 'video' | 'image' | 'pdf' | 'text' | 'carousel';
+export type ContentStatus = 'UPLOADING' | 'READY' | 'FAILED' | 'DRAFT' | 'draft' | 'processing' | 'scheduled' | 'published' | 'failed';
 
 export interface ContentVariant {
-  platform: 'youtube' | 'instagram' | 'tiktok' | 'linkedin' | 'x' | 'facebook' | 'pinterest' | 'threads';
-  format: '16:9' | '9:16' | '1:1' | '4:5' | 'Text' | 'PDF' | 'Reel' | 'Short' | 'Thread' | 'Post';
-  status: ContentStatus;
+  platform: string;
+  format: string;
+  status: string;
   storage_path?: string;
   copy?: string;
+}
+
+export interface Asset {
+  id: string;
+  content_id: string;
+  original_filename: string;
+  storage_key: string;
+  mime_type: string;
+  file_size: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  created_at?: string;
 }
 
 export interface ContentItem {
   id: string;
   title: string;
-  type: ContentType;
-  source?: string;
-  thumbnail?: string;
-  duration?: number;
-  slide_count?: number;
-  dimensions?: string;
-  status: ContentStatus;
-  created_at: string;
-  destinations: string[];
+  content_type: string;
+  type?: string;
+  status: string;
+  text_content?: string;
+  thumbnail_path?: string;
+  created_at?: string;
+  assets?: Asset[];
+  destinations?: string[];
   variants?: ContentVariant[];
+}
+
+export interface ContentListResponse {
+  items: ContentItem[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface SocialAccount {
@@ -80,7 +99,7 @@ export interface ScheduledPost {
   platform: string;
   format: string;
   scheduled_time: string;
-  status: ContentStatus;
+  status: string;
 }
 
 export interface PublishingJob {

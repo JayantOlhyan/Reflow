@@ -22,12 +22,13 @@ class Settings(BaseSettings):
         description="Database connection URL (SQLite or PostgreSQL)"
     )
     
-    # Storage
+    # Storage & Upload Limits
     STORAGE_PROVIDER: str = Field(default="local", description="local | s3 | r2")
     STORAGE_DIR: str = Field(default="./storage", description="Base directory for local file storage")
     STORAGE_BUCKET: Optional[str] = None
     STORAGE_ACCESS_KEY: Optional[str] = None
     STORAGE_SECRET_KEY: Optional[str] = None
+    MAX_UPLOAD_SIZE_MB: int = Field(default=500, description="Max upload size in Megabytes")
     
     # Queue / Cache (Redis)
     REDIS_URL: Optional[str] = Field(default="redis://localhost:6379/0")
