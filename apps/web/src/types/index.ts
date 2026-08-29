@@ -449,3 +449,93 @@ export interface CalendarResponse {
   end_utc: string;
   timezone: string;
 }
+
+// Phase 10: Analytics & Performance Intelligence Interfaces
+export interface PostMetricSnapshot {
+  id: string;
+  publication_id: string;
+  platform: string;
+  external_post_id?: string | null;
+  captured_at: string;
+  views?: number | null;
+  impressions?: number | null;
+  reach?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  saves?: number | null;
+  clicks?: number | null;
+  reposts?: number | null;
+  replies?: number | null;
+  engagements?: number | null;
+  watch_time_seconds?: number | null;
+  average_watch_time_seconds?: number | null;
+  completion_rate?: number | null;
+  followers_gained?: number | null;
+  engagement_rate?: number | null;
+  view_rate?: number | null;
+  raw_metrics?: Record<string, any> | null;
+}
+
+export interface PublicationAnalytics {
+  publication: PublicationItem;
+  content_title: string;
+  content_type: string;
+  latest_snapshot?: PostMetricSnapshot | null;
+  snapshot_count: number;
+  snapshots: PostMetricSnapshot[];
+  views_per_hour?: number | null;
+  engagements_per_hour?: number | null;
+  is_stale: boolean;
+}
+
+export interface AnalyticsOverview {
+  total_publications: number;
+  total_views?: number | null;
+  total_impressions?: number | null;
+  total_reach?: number | null;
+  total_engagements?: number | null;
+  average_engagement_rate?: number | null;
+  average_views_per_publication?: number | null;
+  period_comparison?: Record<string, number | null> | null;
+  start_date: string;
+  end_date: string;
+  last_synced_at?: string | null;
+}
+
+export interface AnalyticsTimeseriesItem {
+  date: string;
+  views?: number | null;
+  engagements?: number | null;
+  publications_count: number;
+}
+
+export interface AnalyticsTimeseriesResponse {
+  items: AnalyticsTimeseriesItem[];
+  total_days: number;
+}
+
+export interface PlatformAnalyticsItem {
+  platform: string;
+  publication_count: number;
+  total_views?: number | null;
+  total_impressions?: number | null;
+  total_engagements?: number | null;
+  engagement_rate?: number | null;
+  supports_analytics: boolean;
+  supported_metrics: string[];
+}
+
+export interface ContentAnalyticsItem {
+  content_id: string;
+  title: string;
+  content_type: string;
+  thumbnail_path?: string | null;
+  publication_count: number;
+  platforms: string[];
+  total_views?: number | null;
+  total_engagements?: number | null;
+  engagement_rate?: number | null;
+  top_platform?: string | null;
+  latest_published_at?: string | null;
+}

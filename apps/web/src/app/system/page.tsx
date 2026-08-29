@@ -13,7 +13,8 @@ import {
   Sparkles,
   HardDrive,
   RefreshCw,
-  Clock
+  Clock,
+  BarChart2
 } from 'lucide-react';
 import { PublishingJob, SystemLog } from '@/types';
 import { api } from '@/lib/api';
@@ -204,6 +205,20 @@ function SystemContent() {
                 </span>
               </div>
               <p className="text-xs text-gray-400">{healthData.components.scheduler?.details || "UTC Server-Side Daemon"}</p>
+            </div>
+
+            {/* Analytics Engine Component (Phase 10) */}
+            <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Analytics Engine</span>
+                <BarChart2 className="w-4 h-4 text-indigo-400" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.analytics?.status || 'healthy')}`}>
+                  {healthData.components.analytics?.status || 'Active'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400">{healthData.components.analytics?.details || "Async Metric Ingestion & Snapshots"}</p>
             </div>
           </div>
         </div>

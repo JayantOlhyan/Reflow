@@ -6,7 +6,10 @@ import {
   PlatformConnectionItem, PublicationItem, PublicationCreateData,
   BatchPublicationCreateData, BatchPublicationResponse,
   SchedulePublicationCreateData, SchedulePublicationResponse,
-  RescheduleData, CalendarEventItem, CalendarResponse
+  RescheduleData, CalendarEventItem, CalendarResponse,
+  PostMetricSnapshot, PublicationAnalytics, AnalyticsOverview,
+  AnalyticsTimeseriesItem, AnalyticsTimeseriesResponse,
+  PlatformAnalyticsItem, ContentAnalyticsItem
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -486,6 +489,66 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
+  }
+
+  // Phase 10: Analytics & Performance Intelligence API Methods
+  async getAnalyticsOverview(params?: { start?: string; end?: string; platform?: string; content_type?: string }): Promise<AnalyticsOverview> {
+    const query = new URLSearchParams();
+    if (params?.start) query.set('start', params.start);
+    if (params?.end) query.set('end', params.end);
+    if (params?.platform) query.set('platform', params.platform);
+    if (params?.content_type) query.set('content_type', params.content_type);
+    return this.request<AnalyticsOverview>(`/api/analytics/overview?${query.toString()}`);
+  }
+
+  async getAnalyticsTimeseries(params?: { start?: string; end?: string; platform?: string }): Promise<AnalyticsTimeseriesResponse> {
+    const query = new URLSearchParams();
+    if (params?.start) query.set('start', params.start);
+    if (params?.end) query.set('end', params.end);
+    if (params?.platform) query.set('platform', params.platform);
+    return this.request<AnalyticsTimeseriesResponse>(`/api/analytics/timeseries?${query.toString()}`);
+  }
+
+  async getPlatformAnalytics(params?: { start?: string; end?: string }): Promise<PlatformAnalyticsItem[]> {
+    const query = new URLSearchParams();
+    if (params?.start) query.set('start', params.start);
+    if (params?.end) query.set('end', params.end);
+    return this.request<PlatformAnalyticsItem[]>(`/api/analytics/platforms?${query.toString()}`);
+  }
+
+  async getContentAnalytics(params?: { start?: string; end?: string; content_type?: string; sort_by?: string }): Promise<ContentAnalyticsItem[]> {
+    const query = new URLSearchParams();
+    if (params?.start) query.set('start', params.start);
+    if (params?.end) query.set('end', params.end);
+    if (params?.content_type) query.set('content_type', params.content_type);
+    if (params?.sort_by) query.set('sort_by', params.sort_by);
+    return this.request<ContentAnalyticsItem[]>(`/api/analytics/content?${query.toString()}`);
+  }
+
+  async getPublicationAnalytics(pubId: string): Promise<PublicationAnalytics> {
+    return this.request<PublicationAnalytics>(`/api/analytics/publications/${pubId}`);
+  }
+
+  async refreshPublicationAnalytics(pubId: string): Promise<{ status: string; job_id: string; message: string }> {
+    return this.request<{ status: string; job_id: string; message: string }>(`/api/analytics/publications/${pubId}/refresh`, {
+      method: 'POST'
+    });
+  }
+
+  async backfillAnalytics(data?: { start_date?: string; end_date?: string; platform?: string; limit?: number }): Promise<{ queued_count: number; message: string }> {
+    return this.request<{ queued_count: number; message: string }>('/api/analytics/backfill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data || {})
+    });
+  }
+
+  getAnalyticsExportUrl(params?: { start?: string; end?: string; platform?: string }): string {
+    const query = new URLSearchParams();
+    if (params?.start) query.set('start', params.start);
+    if (params?.end) query.set('end', params.end);
+    if (params?.platform) query.set('platform', params.platform);
+    return `${this.baseUrl}/api/analytics/export?${query.toString()}`;
   }
 
   async publish(platform: string) {
