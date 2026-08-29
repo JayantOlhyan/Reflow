@@ -30,6 +30,30 @@ services:
       - STORAGE_PROVIDER=local
       - STORAGE_DIR=/app/storage
       - REDIS_URL=redis://redis:6379/0
+      - REDIS_MEDIA_QUEUE=reflow:media_jobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: reflow_worker
+    command: ["python", "worker.py"]
+    volumes:
+      - storage_data:/app/storage
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow
+      - STORAGE_PROVIDER=local
+      - STORAGE_DIR=/app/storage
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_MEDIA_QUEUE=reflow:media_jobs
+      - MEDIA_WORKER_CONCURRENCY=1
     depends_on:
       postgres:
         condition: service_healthy
