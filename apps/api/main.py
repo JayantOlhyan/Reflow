@@ -37,7 +37,10 @@ from models.schemas import (
     PublicationCreateRequest, PublicationResponse, PublicationListResponse,
     BatchPublicationCreateRequest, BatchPublicationResponse, PublicationDestinationItem,
     ScheduleDestinationItem, SchedulePublicationCreateRequest, SchedulePublicationResponse,
-    RescheduleRequest, CalendarEventItem, CalendarResponse
+    RescheduleRequest, CalendarEventItem, CalendarResponse,
+    PostMetricSnapshotResponse, PublicationAnalyticsResponse, AnalyticsOverviewResponse,
+    AnalyticsTimeseriesItem, AnalyticsTimeseriesResponse, PlatformAnalyticsItem,
+    ContentAnalyticsItem, AnalyticsBackfillRequest, AnalyticsBackfillResponse
 )
 from services.media_service import media_processor
 from services.queue_service import queue_service
@@ -48,6 +51,7 @@ from services.clip_helper import fetch_full_clip, fetch_content_clips
 from services.caption_service import caption_service
 from services.publishing_service import publishing_service
 from services.scheduler_service import scheduler_service
+from services.analytics_service import analytics_service
 from connectors.youtube import youtube_oauth, youtube_connector
 from services.encryption_service import encryption_service
 from services.health_service import health_service
@@ -1836,6 +1840,267 @@ async def reschedule_publication_endpoint(
         raise HTTPException(status_code=422, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Rescheduling error: {e}")
+
+# ------------------------------------------------------------------------------
+# Phase 10: Real Analytics & Performance Intelligence API
+# ------------------------------------------------------------------------------
+
+@app.get("/api/analytics/overview", response_model=AnalyticsOverviewResponse, tags=["Analytics"])
+async def get_analytics_overview_endpoint(
+    start: Optional[str] = Query(None, description="Start date (YYYY-MM-DD or ISO)"),
+    end: Optional[str] = Query(None, description="End date (YYYY-MM-DD or ISO)"),
+    platform: Optional[str] = Query(None),
+    content_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    now_utc = datetime.utcnow()
+    s_date = datetime.fromisoformat(start) if start else (now_utc - timedelta(days=30))
+    e_date = datetime.fromisoformat(end) if end else now_utc
+
+    data = await analytics_service.get_overview_analytics(
+        start_date=s_date,
+        end_date=e_date,
+        platform=platform,
+        content_type=content_type,
+        db=db
+    )
+    return AnalyticsOverviewResponse(**data)
+
+@app.get("/api/analytics/timeseries", response_model=AnalyticsTimeseriesResponse, tags=["Analytics"])
+async def get_analytics_timeseries_endpoint(
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    platform: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    now_utc = datetime.utcnow()
+    s_date = datetime.fromisoformat(start) if start else (now_utc - timedelta(days=30))
+    e_date = datetime.fromisoformat(end) if end else now_utc
+
+    items = await analytics_service.get_timeseries_analytics(
+        start_date=s_date,
+        end_date=e_date,
+        platform=platform,
+        db=db
+    )
+    return AnalyticsTimeseriesResponse(
+        items=[AnalyticsTimeseriesItem(**it) for it in items],
+        total_days=len(items)
+    )
+
+@app.get("/api/analytics/platforms", response_model=List[PlatformAnalyticsItem], tags=["Analytics"])
+async def get_platform_analytics_endpoint(
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    now_utc = datetime.utcnow()
+    s_date = datetime.fromisoformat(start) if start else (now_utc - timedelta(days=30))
+    e_date = datetime.fromisoformat(end) if end else now_utc
+
+    items = await analytics_service.get_platform_analytics(
+        start_date=s_date,
+        end_date=e_date,
+        db=db
+    )
+    return [PlatformAnalyticsItem(**it) for it in items]
+
+@app.get("/api/analytics/content", response_model=List[ContentAnalyticsItem], tags=["Analytics"])
+async def get_content_analytics_endpoint(
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    content_type: Optional[str] = Query(None),
+    sort_by: str = Query("views"),
+    db: AsyncSession = Depends(get_db)
+):
+    now_utc = datetime.utcnow()
+    s_date = datetime.fromisoformat(start) if start else (now_utc - timedelta(days=30))
+    e_date = datetime.fromisoformat(end) if end else now_utc
+
+    items = await analytics_service.get_content_analytics(
+        start_date=s_date,
+        end_date=e_date,
+        content_type=content_type,
+        sort_by=sort_by,
+        db=db
+    )
+    return [ContentAnalyticsItem(**it) for it in items]
+
+@app.get("/api/analytics/publications/{publication_id}", response_model=PublicationAnalyticsResponse, tags=["Analytics"])
+async def get_publication_analytics_endpoint(
+    publication_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        data = await analytics_service.get_publication_analytics(publication_id=publication_id, db=db)
+        pub = data["publication"]
+        latest = data["latest_snapshot"]
+        snapshots = data["snapshots"]
+
+        latest_resp = None
+        if latest:
+            rate = analytics_service.calculate_engagement_rate(
+                latest.likes, latest.comments, latest.shares, latest.saves, latest.reach, latest.impressions
+            )
+            v_rate = analytics_service.calculate_view_rate(latest.views, latest.impressions)
+            latest_resp = PostMetricSnapshotResponse(
+                id=latest.id,
+                publication_id=latest.publication_id,
+                platform=latest.platform,
+                external_post_id=latest.external_post_id,
+                captured_at=latest.captured_at,
+                views=latest.views,
+                impressions=latest.impressions,
+                reach=latest.reach,
+                likes=latest.likes,
+                comments=latest.comments,
+                shares=latest.shares,
+                saves=latest.saves,
+                clicks=latest.clicks,
+                reposts=latest.reposts,
+                replies=latest.replies,
+                engagements=latest.engagements,
+                watch_time_seconds=latest.watch_time_seconds,
+                average_watch_time_seconds=latest.average_watch_time_seconds,
+                completion_rate=latest.completion_rate,
+                followers_gained=latest.followers_gained,
+                engagement_rate=rate,
+                view_rate=v_rate,
+                raw_metrics=latest.raw_metrics
+            )
+
+        snap_list = []
+        for s in snapshots:
+            r = analytics_service.calculate_engagement_rate(s.likes, s.comments, s.shares, s.saves, s.reach, s.impressions)
+            vr = analytics_service.calculate_view_rate(s.views, s.impressions)
+            snap_list.append(PostMetricSnapshotResponse(
+                id=s.id,
+                publication_id=s.publication_id,
+                platform=s.platform,
+                external_post_id=s.external_post_id,
+                captured_at=s.captured_at,
+                views=s.views,
+                impressions=s.impressions,
+                reach=s.reach,
+                likes=s.likes,
+                comments=s.comments,
+                shares=s.shares,
+                saves=s.saves,
+                clicks=s.clicks,
+                reposts=s.reposts,
+                replies=s.replies,
+                engagements=s.engagements,
+                watch_time_seconds=s.watch_time_seconds,
+                average_watch_time_seconds=s.average_watch_time_seconds,
+                completion_rate=s.completion_rate,
+                followers_gained=s.followers_gained,
+                engagement_rate=r,
+                view_rate=vr,
+                raw_metrics=s.raw_metrics
+            ))
+
+        return PublicationAnalyticsResponse(
+            publication=PublicationResponse.model_validate(pub),
+            content_title=data["content_title"],
+            content_type=data["content_type"],
+            latest_snapshot=latest_resp,
+            snapshot_count=data["snapshot_count"],
+            snapshots=snap_list,
+            views_per_hour=data["views_per_hour"],
+            engagements_per_hour=data["engagements_per_hour"],
+            is_stale=data["is_stale"]
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve publication analytics: {e}")
+
+@app.post("/api/analytics/publications/{publication_id}/refresh", tags=["Analytics"])
+async def refresh_publication_analytics(
+    publication_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Triggers an immediate asynchronous background sync for a publication's metrics."""
+    res = await db.execute(select(Publication).where(Publication.id == publication_id))
+    pub = res.scalar_one_or_none()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publication not found.")
+
+    if pub.status != "PUBLISHED":
+        raise HTTPException(status_code=400, detail=f"Cannot refresh analytics for publication in '{pub.status}' state.")
+
+    # Enforce refresh cooldown
+    now_utc = datetime.utcnow()
+    if pub.last_analytics_sync_at:
+        delta = (now_utc - pub.last_analytics_sync_at).total_seconds()
+        if delta < settings.ANALYTICS_REFRESH_COOLDOWN_SECONDS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Please wait {int(settings.ANALYTICS_REFRESH_COOLDOWN_SECONDS - delta)} seconds before refreshing analytics again."
+            )
+
+    job_id = f"job_ana_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        content_id=pub.content_id,
+        type="ANALYTICS_SYNC",
+        status="QUEUED",
+        created_at=now_utc
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        content_id=pub.content_id,
+        job_type="ANALYTICS_SYNC",
+        publication_id=pub.id
+    )
+
+    return {"status": "queued", "job_id": job_id, "message": "Analytics sync job queued."}
+
+@app.post("/api/analytics/backfill", response_model=AnalyticsBackfillResponse, tags=["Analytics"])
+async def backfill_analytics_endpoint(
+    req: AnalyticsBackfillRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    s_date = datetime.fromisoformat(req.start_date) if req.start_date else None
+    e_date = datetime.fromisoformat(req.end_date) if req.end_date else None
+
+    count = await analytics_service.backfill_analytics(
+        start_date=s_date,
+        end_date=e_date,
+        platform=req.platform,
+        limit=req.limit,
+        db=db
+    )
+    return AnalyticsBackfillResponse(
+        queued_count=count,
+        message=f"Successfully queued {count} historical analytics sync job(s)."
+    )
+
+@app.get("/api/analytics/export", tags=["Analytics"])
+async def export_analytics_csv_endpoint(
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    platform: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    now_utc = datetime.utcnow()
+    s_date = datetime.fromisoformat(start) if start else (now_utc - timedelta(days=30))
+    e_date = datetime.fromisoformat(end) if end else now_utc
+
+    csv_content = await analytics_service.export_analytics_csv(
+        start_date=s_date,
+        end_date=e_date,
+        platform=platform,
+        db=db
+    )
+    return PlainTextResponse(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=reflow_analytics_{now_utc.strftime('%Y%m%d')}.csv"}
+    )
 
 # ------------------------------------------------------------------------------
 # Workflows & System Telemetry

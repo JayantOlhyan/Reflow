@@ -17,6 +17,7 @@ from services.storage_service import storage_service
 from services.ai_service import ai_service
 from services.carousel_renderer import carousel_renderer
 from services.publishing_service import publishing_service
+from services.analytics_service import analytics_service
 from utils.logging import get_logger
 
 logger = get_logger("MediaWorker")
@@ -191,9 +192,35 @@ async def process_single_job(payload: dict) -> bool:
             )
 
         elif job_type == "PLATFORM_PUBLISH":
-            # 9. Execute external platform video publication
+            # 9. Execute external platform publication
             publication_id = payload.get("publication_id")
-            await publishing_service.execute_publication_job(publication_id=publication_id)
+            pub_res = await publishing_service.execute_publication_job(publication_id=publication_id)
+
+            # Auto-enqueue initial metrics sync immediately following successful publication
+            if pub_res and pub_res.get("status") == "published":
+                ana_job_id = f"job_ana_{uuid.uuid4().hex[:8]}"
+                async with async_session_factory() as session:
+                    ana_job = Job(
+                        id=ana_job_id,
+                        content_id=content_id,
+                        type="ANALYTICS_SYNC",
+                        status="QUEUED",
+                        created_at=datetime.utcnow()
+                    )
+                    session.add(ana_job)
+                    await session.commit()
+
+                await queue_service.enqueue_media_job(
+                    job_id=ana_job_id,
+                    content_id=content_id,
+                    job_type="ANALYTICS_SYNC",
+                    publication_id=publication_id
+                )
+
+        elif job_type == "ANALYTICS_SYNC":
+            # 10. Sync performance metrics from external platform
+            publication_id = payload.get("publication_id")
+            await analytics_service.sync_publication_metrics(publication_id=publication_id)
 
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:

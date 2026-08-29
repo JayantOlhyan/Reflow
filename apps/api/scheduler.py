@@ -17,6 +17,8 @@ async def run_scheduler():
     logger.info(f"Starting Reflow Content Scheduler daemon (Instance: {scheduler_service.instance_id}, Interval: {settings.SCHEDULER_POLL_INTERVAL_SECONDS}s)...")
     await init_db()
 
+    last_analytics_sweep = datetime.utcnow() - timedelta(minutes=settings.ANALYTICS_SYNC_INTERVAL_MINUTES)
+
     while True:
         try:
             scheduler_service.record_heartbeat()
@@ -31,6 +33,14 @@ async def run_scheduler():
             if claimed_ids:
                 dispatched = await scheduler_service.dispatch_claimed_publications(claimed_ids)
                 logger.info(f"Dispatched {dispatched} due publication(s) to publishing worker queue.")
+
+            # 4. Periodic analytics sync sweep
+            now_utc = datetime.utcnow()
+            if (now_utc - last_analytics_sweep).total_seconds() >= (settings.ANALYTICS_SYNC_INTERVAL_MINUTES * 60):
+                from services.analytics_service import analytics_service
+                logger.info("Executing scheduled analytics sync sweep for published posts...")
+                await analytics_service.backfill_analytics(limit=50)
+                last_analytics_sweep = now_utc
 
             await asyncio.sleep(settings.SCHEDULER_POLL_INTERVAL_SECONDS)
 
