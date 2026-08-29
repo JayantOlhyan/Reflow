@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   Plus, 
@@ -13,72 +13,38 @@ import {
   FileText, 
   Sparkles, 
   Upload, 
-  X 
+  X,
+  Trash2,
+  RefreshCw,
+  FolderOpen
 } from 'lucide-react';
 import { ContentItem, ContentType } from '@/types';
 import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon } from '@/components/ui/SocialIcons';
+import { api } from '@/lib/api';
 
 export default function ContentLibraryPage() {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ContentItem[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [items, setItems] = useState<ContentItem[]>([
-    {
-      id: 'cnt-1',
-      title: 'Building an AI SaaS in 24 hours',
-      type: 'video',
-      thumbnail: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
-      duration: 762,
-      dimensions: '4K - 16:9',
-      status: 'published',
-      created_at: 'Aug 28, 2026',
-      destinations: ['youtube', 'instagram', 'tiktok'],
-      variants: [
-        { platform: 'youtube', format: '16:9', status: 'published' },
-        { platform: 'instagram', format: '9:16', status: 'published' },
-        { platform: 'tiktok', format: '9:16', status: 'published' }
-      ]
-    },
-    {
-      id: 'cnt-2',
-      title: '10 AI Tools that 10x Productivity',
-      type: 'carousel',
-      thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
-      slide_count: 8,
-      status: 'published',
-      created_at: 'Aug 27, 2026',
-      destinations: ['linkedin', 'instagram'],
-      variants: [
-        { platform: 'linkedin', format: '4:5', status: 'published' },
-        { platform: 'instagram', format: '1:1', status: 'published' }
-      ]
-    },
-    {
-      id: 'cnt-3',
-      title: 'Automation Workflow Breakdown',
-      type: 'image',
-      thumbnail: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
-      dimensions: '1080x1350',
-      status: 'scheduled',
-      created_at: 'Aug 26, 2026',
-      destinations: ['x', 'linkedin'],
-      variants: [
-        { platform: 'x', format: '16:9', status: 'scheduled' },
-        { platform: 'linkedin', format: '4:5', status: 'scheduled' }
-      ]
-    },
-    {
-      id: 'cnt-4',
-      title: 'My Learnings From 30 Days of Building',
-      type: 'text',
-      thumbnail: 'https://images.unsplash.com/photo-1517842645767-c639042777db?w=600&auto=format&fit=crop&q=80',
-      status: 'draft',
-      created_at: 'Aug 25, 2026',
-      destinations: ['x', 'linkedin'],
-      variants: []
+  useEffect(() => {
+    loadContent();
+  }, []);
+
+  const loadContent = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getContentList();
+      setItems(data);
+    } catch (err) {
+      console.warn("Failed to fetch content list:", err);
+    } finally {
+      setLoading(false);
     }
-  ]);
+  };
 
   const tabs = [
     { id: 'all', label: 'All' },
@@ -114,26 +80,41 @@ export default function ContentLibraryPage() {
     }
   };
 
-  const handleUploadSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUploadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const title = formData.get('title') as string;
     const type = formData.get('type') as ContentType;
 
-    const newItem: ContentItem = {
-      id: `cnt-${Date.now()}`,
-      title: title || 'New Content Asset',
-      type: type || 'video',
-      thumbnail: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80',
-      duration: type === 'video' ? 180 : undefined,
-      slide_count: type === 'carousel' ? 5 : undefined,
-      status: 'draft',
-      created_at: 'Just now',
-      destinations: ['instagram', 'youtube']
-    };
+    try {
+      setIsSubmitting(true);
+      const newItem = await api.createContent({
+        title: title || 'New Content Asset',
+        type: type || 'video',
+        thumbnail: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80',
+        duration: type === 'video' ? 180 : undefined,
+        slide_count: type === 'carousel' ? 5 : undefined,
+        status: 'draft',
+        destinations: ['instagram', 'youtube']
+      });
 
-    setItems([newItem, ...items]);
-    setIsUploadModalOpen(false);
+      setItems([newItem, ...items]);
+      setIsUploadModalOpen(false);
+    } catch (err: any) {
+      alert(`Upload failed: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this asset?")) return;
+    try {
+      await api.deleteContent(id);
+      setItems(items.filter(item => item.id !== id));
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message}`);
+    }
   };
 
   return (
@@ -195,65 +176,94 @@ export default function ContentLibraryPage() {
         </div>
       </div>
 
-      {/* Grid of Content Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {filteredItems.map((item) => (
-          <div
-            key={item.id}
-            className="group bg-[#111827]/90 border border-[#1F2937] hover:border-indigo-500/50 rounded-2xl overflow-hidden transition-all duration-200 flex flex-col hover:shadow-xl hover:shadow-indigo-500/5"
+      {/* Grid or Empty State */}
+      {loading ? (
+        <div className="py-20 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
+          <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>Loading content library...</span>
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="py-20 text-center bg-[#111827]/40 border border-dashed border-[#1F2937] rounded-2xl p-8 space-y-3">
+          <FolderOpen className="w-10 h-10 text-gray-600 mx-auto" />
+          <h3 className="text-sm font-semibold text-white">No content items found</h3>
+          <p className="text-xs text-gray-400 max-w-sm mx-auto">
+            {searchQuery ? "No assets match your search criteria." : "Your library is currently empty. Upload your first video, image, carousel, or text draft to begin."}
+          </p>
+          <button
+            onClick={() => setIsUploadModalOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all mt-2"
           >
-            <div className="relative aspect-[16/10] bg-[#161B26] overflow-hidden">
-              <img
-                src={item.thumbnail}
-                alt={item.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0B0D12]/90 via-transparent to-transparent" />
+            <Upload className="w-3.5 h-3.5" />
+            <span>Upload First Asset</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {filteredItems.map((item) => (
+            <div
+              key={item.id}
+              className="group bg-[#111827]/90 border border-[#1F2937] hover:border-indigo-500/50 rounded-2xl overflow-hidden transition-all duration-200 flex flex-col hover:shadow-xl hover:shadow-indigo-500/5"
+            >
+              <div className="relative aspect-[16/10] bg-[#161B26] overflow-hidden">
+                <img
+                  src={item.thumbnail || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80'}
+                  alt={item.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0B0D12]/90 via-transparent to-transparent" />
 
-              <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 bg-[#0B0D12]/80 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 text-[10px] font-semibold text-gray-200">
-                {item.type === 'video' && <Video className="w-3 h-3 text-red-400" />}
-                {item.type === 'carousel' && <Layers className="w-3 h-3 text-purple-400" />}
-                {item.type === 'image' && <ImageIcon className="w-3 h-3 text-emerald-400" />}
-                {item.type === 'text' && <FileText className="w-3 h-3 text-cyan-400" />}
-                <span className="capitalize">{item.type}</span>
-              </div>
-
-              <div className="absolute bottom-2.5 right-2.5 bg-[#0B0D12]/90 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-medium text-gray-300">
-                {item.duration ? formatDurationBadge(item.duration) : item.slide_count ? `${item.slide_count} Slides` : item.dimensions || 'Draft'}
-              </div>
-            </div>
-
-            <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-              <div>
-                <h3 className="text-xs font-semibold text-white line-clamp-1 group-hover:text-indigo-300 transition-colors">
-                  {item.title}
-                </h3>
-                <p className="text-[11px] text-gray-400 mt-1">
-                  {item.created_at} • {item.dimensions || (item.type === 'video' ? '4K 16:9' : item.type)}
-                </p>
-              </div>
-
-              <div className="pt-2 border-t border-[#1F2937]/70 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  {item.destinations.map((dest) => (
-                    <span key={dest} className="w-5 h-5 rounded-md bg-[#161B26] border border-[#1F2937] flex items-center justify-center">
-                      {getPlatformIcon(dest)}
-                    </span>
-                  ))}
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 bg-[#0B0D12]/80 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 text-[10px] font-semibold text-gray-200">
+                  {item.type === 'video' && <Video className="w-3 h-3 text-red-400" />}
+                  {item.type === 'carousel' && <Layers className="w-3 h-3 text-purple-400" />}
+                  {item.type === 'image' && <ImageIcon className="w-3 h-3 text-emerald-400" />}
+                  {item.type === 'text' && <FileText className="w-3 h-3 text-cyan-400" />}
+                  <span className="capitalize">{item.type}</span>
                 </div>
 
-                <Link
-                  href={`/repurpose?id=${item.id}`}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 text-indigo-300 hover:text-white text-[11px] font-medium transition-all"
+                <button
+                  onClick={() => handleDelete(item.id)}
+                  className="absolute top-2.5 right-2.5 p-1 rounded-lg bg-black/60 hover:bg-rose-600/80 text-gray-300 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
                 >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Repurpose</span>
-                </Link>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+
+                <div className="absolute bottom-2.5 right-2.5 bg-[#0B0D12]/90 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-medium text-gray-300">
+                  {item.duration ? formatDurationBadge(item.duration) : item.slide_count ? `${item.slide_count} Slides` : item.dimensions || 'Draft'}
+                </div>
+              </div>
+
+              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                <div>
+                  <h3 className="text-xs font-semibold text-white line-clamp-1 group-hover:text-indigo-300 transition-colors">
+                    {item.title}
+                  </h3>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {item.created_at || 'Recently'} • {item.dimensions || (item.type === 'video' ? '16:9' : item.type)}
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-[#1F2937]/70 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {item.destinations.map((dest) => (
+                      <span key={dest} className="w-5 h-5 rounded-md bg-[#161B26] border border-[#1F2937] flex items-center justify-center">
+                        {getPlatformIcon(dest)}
+                      </span>
+                    ))}
+                  </div>
+
+                  <Link
+                    href={`/repurpose?id=${item.id}`}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 text-indigo-300 hover:text-white text-[11px] font-medium transition-all"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Repurpose</span>
+                  </Link>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Upload Modal */}
       {isUploadModalOpen && (
@@ -294,7 +304,7 @@ export default function ContentLibraryPage() {
               <div className="border-2 border-dashed border-[#1F2937] hover:border-indigo-500/60 rounded-xl p-6 text-center transition-colors cursor-pointer bg-[#161B26]/40">
                 <Upload className="w-6 h-6 text-indigo-400 mx-auto mb-2" />
                 <p className="text-xs text-gray-300 font-medium">Drag & drop files or click to browse</p>
-                <p className="text-[10px] text-gray-500 mt-1">Supports Video (up to 4GB), Images, PDFs</p>
+                <p className="text-[10px] text-gray-500 mt-1">Supports Video (up to 500MB), Images, PDFs</p>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
@@ -307,9 +317,10 @@ export default function ContentLibraryPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all disabled:opacity-50"
                 >
-                  Upload Asset
+                  {isSubmitting ? "Creating..." : "Upload Asset"}
                 </button>
               </div>
             </form>

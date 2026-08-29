@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   Sparkles, 
@@ -10,46 +10,61 @@ import {
   AlertCircle, 
   CheckCircle2, 
   TrendingUp,
-  Plus
+  Plus,
+  RefreshCw,
+  FolderOpen
 } from 'lucide-react';
 import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon } from '@/components/ui/SocialIcons';
+import { api } from '@/lib/api';
 
 export default function OverviewPage() {
-  const [metrics] = useState({
-    total: 24,
-    published: 18,
-    scheduled: 6,
-    failed: 2
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [overview, setOverview] = useState<{
+    metrics: { total: number; published: number; scheduled: number; failed: number };
+    recent_activity: any[];
+  }>({
+    metrics: { total: 0, published: 0, scheduled: 0, failed: 0 },
+    recent_activity: []
   });
 
-  const recentActivity = [
-    { id: '1', title: 'Instagram Reel', subtitle: 'Building in Public, Day 20', status: 'published', platform: 'instagram', time: '2m ago' },
-    { id: '2', title: 'YouTube Short', subtitle: 'AI Automation System', status: 'processing', platform: 'youtube', time: '5m ago' },
-    { id: '3', title: 'LinkedIn Post', subtitle: '10 Lessons from building', status: 'scheduled', platform: 'linkedin', time: '1h ago' },
-    { id: '4', title: 'X Post', subtitle: 'Quick update on the build', status: 'published', platform: 'x', time: '2h ago' },
-    { id: '5', title: 'TikTok Video', subtitle: 'Behind the scenes', status: 'failed', platform: 'tiktok', time: '3h ago' }
-  ];
+  const [healthStatus, setHealthStatus] = useState<string>("checking");
 
-  const distribution = [
-    { platform: 'YouTube', count: 32, percentage: 38, color: '#EF4444' },
-    { platform: 'Instagram', count: 21, percentage: 25, color: '#EC4899' },
-    { platform: 'TikTok', count: 15, percentage: 18, color: '#06B6D4' },
-    { platform: 'LinkedIn', count: 10, percentage: 12, color: '#3B82F6' },
-    { platform: 'X', count: 6, percentage: 7, color: '#9CA3AF' },
-  ];
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const data = await api.getOverview();
+        setOverview(data);
+        const health = await api.getSystemHealth();
+        setHealthStatus(health.status);
+      } catch (err: any) {
+        console.warn("Could not load overview from server:", err);
+        setError("Unable to connect to Reflow API server.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  const metrics = overview.metrics;
 
   const statusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'published':
+      case 'succeeded':
         return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Published</span>;
       case 'processing':
+      case 'running':
         return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse">Processing</span>;
       case 'scheduled':
-        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">Scheduled</span>;
+      case 'queued':
+        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">Queued</span>;
       case 'failed':
         return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">Failed</span>;
       default:
-        return null;
+        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-gray-700/50 text-gray-300">{status || 'Draft'}</span>;
     }
   };
 
@@ -84,6 +99,13 @@ export default function OverviewPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 flex items-center justify-between">
+          <span>{error} Operating in offline mode.</span>
+          <button onClick={() => window.location.reload()} className="underline font-semibold">Retry</button>
+        </div>
+      )}
+
       {/* Metrics Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-[#111827]/80 backdrop-blur-sm border border-[#1F2937] rounded-2xl p-5 hover:border-indigo-500/40 transition-all group">
@@ -92,10 +114,7 @@ export default function OverviewPage() {
             <Layers className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{metrics.total}</span>
-            <span className="text-xs text-emerald-400 font-medium flex items-center">
-              +12% <TrendingUp className="w-3 h-3 ml-0.5" />
-            </span>
+            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.total}</span>
           </div>
           <span className="text-[11px] text-gray-500 mt-1 block">Assets in repository</span>
         </div>
@@ -106,8 +125,7 @@ export default function OverviewPage() {
             <CheckCircle2 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{metrics.published}</span>
-            <span className="text-xs text-emerald-400 font-medium">84 total posts</span>
+            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.published}</span>
           </div>
           <span className="text-[11px] text-gray-500 mt-1 block">Live across platforms</span>
         </div>
@@ -118,8 +136,7 @@ export default function OverviewPage() {
             <Clock className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{metrics.scheduled}</span>
-            <span className="text-xs text-amber-400 font-medium">Next: 7:30 PM</span>
+            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.scheduled}</span>
           </div>
           <span className="text-[11px] text-gray-500 mt-1 block">Upcoming queue items</span>
         </div>
@@ -130,50 +147,59 @@ export default function OverviewPage() {
             <AlertCircle className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{metrics.failed}</span>
-            <span className="text-xs text-rose-400 font-medium">Action needed</span>
+            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.failed}</span>
           </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">Auto-retry pending</span>
+          <span className="text-[11px] text-gray-500 mt-1 block">Action needed</span>
         </div>
       </div>
 
       {/* Main Grid: Recent Activity & Content Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Recent Activity */}
-        <div className="lg:col-span-7 bg-[#111827]/80 border border-[#1F2937] rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-base font-semibold text-white">Recent Activity</h2>
-              <p className="text-xs text-gray-400">Latest pipeline executions and status</p>
-            </div>
-            <Link href="/content" className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
-              View all <ArrowUpRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          <div className="divide-y divide-[#1F2937]">
-            {recentActivity.map((item) => (
-              <div key={item.id} className="py-3.5 flex items-center justify-between gap-4 first:pt-0 last:pb-0 group hover:bg-[#161B26]/50 px-2 rounded-xl transition-colors">
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-9 h-9 rounded-xl bg-[#161B26] border border-[#1F2937] flex items-center justify-center flex-shrink-0">
-                    {item.platform === 'youtube' && <YoutubeIcon className="w-4 h-4 text-red-400" />}
-                    {item.platform === 'instagram' && <InstagramIcon className="w-4 h-4 text-pink-400" />}
-                    {item.platform === 'linkedin' && <LinkedinIcon className="w-4 h-4 text-blue-400" />}
-                    {item.platform === 'x' && <XIcon className="w-3.5 h-3.5 text-gray-300" />}
-                    {item.platform === 'tiktok' && <TiktokIcon className="w-3.5 h-3.5 text-cyan-400" />}
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-xs font-semibold text-white truncate">{item.title}</h4>
-                    <p className="text-[11px] text-gray-400 truncate">{item.subtitle}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  {statusBadge(item.status)}
-                  <span className="text-[11px] text-gray-500 w-16 text-right">{item.time}</span>
-                </div>
+        <div className="lg:col-span-7 bg-[#111827]/80 border border-[#1F2937] rounded-2xl p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-base font-semibold text-white">Recent Activity</h2>
+                <p className="text-xs text-gray-400">Latest pipeline executions and status</p>
               </div>
-            ))}
+              <Link href="/content" className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
+                View all <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="py-12 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+                <span>Loading activity stream...</span>
+              </div>
+            ) : overview.recent_activity.length === 0 ? (
+              <div className="py-12 text-center text-xs text-gray-500 space-y-2">
+                <FolderOpen className="w-8 h-8 text-gray-600 mx-auto" />
+                <p className="text-gray-400 font-medium">No recent activity yet</p>
+                <p className="text-[11px]">Upload an asset or create a repurpose job to get started.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-[#1F2937]">
+                {overview.recent_activity.map((item) => (
+                  <div key={item.id} className="py-3.5 flex items-center justify-between gap-4 first:pt-0 last:pb-0 px-2 hover:bg-[#161B26]/50 rounded-xl transition-colors">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-[#161B26] border border-[#1F2937] flex items-center justify-center flex-shrink-0">
+                        <Sparkles className="w-4 h-4 text-indigo-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-semibold text-white truncate">{item.title}</h4>
+                        <p className="text-[11px] text-gray-400 truncate">{item.created_at || 'Recently'}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {statusBadge(item.status)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -183,73 +209,37 @@ export default function OverviewPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-base font-semibold text-white">Content Distribution</h2>
-                <p className="text-xs text-gray-400">Last 7 days volume across channels</p>
+                <p className="text-xs text-gray-400">Total published volume across channels</p>
               </div>
-              <span className="text-xs font-medium text-gray-400 bg-[#161B26] px-2.5 py-1 rounded-lg border border-[#1F2937]">Last 7 days</span>
             </div>
 
-            {/* Donut Graphic Visualizer */}
             <div className="flex items-center justify-center py-6">
               <div className="relative w-44 h-44 flex items-center justify-center">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="38" fill="transparent" stroke="#1F2937" strokeWidth="12" />
-                  <circle
-                    cx="50" cy="50" r="38"
-                    fill="transparent"
-                    stroke="#EF4444"
-                    strokeWidth="12"
-                    strokeDasharray="238.76"
-                    strokeDashoffset="0"
-                    strokeLinecap="round"
-                  />
-                  <circle
-                    cx="50" cy="50" r="38"
-                    fill="transparent"
-                    stroke="#8B5CF6"
-                    strokeWidth="12"
-                    strokeDasharray="60 178"
-                    strokeDashoffset="-90"
-                  />
-                  <circle
-                    cx="50" cy="50" r="38"
-                    fill="transparent"
-                    stroke="#06B6D4"
-                    strokeWidth="12"
-                    strokeDasharray="42 196"
-                    strokeDashoffset="-150"
-                  />
-                  <circle
-                    cx="50" cy="50" r="38"
-                    fill="transparent"
-                    stroke="#3B82F6"
-                    strokeWidth="12"
-                    strokeDasharray="28 210"
-                    strokeDashoffset="-192"
-                  />
+                  {metrics.published > 0 && (
+                    <circle
+                      cx="50" cy="50" r="38"
+                      fill="transparent"
+                      stroke="#6366F1"
+                      strokeWidth="12"
+                      strokeDasharray="238.76"
+                      strokeDashoffset="0"
+                      strokeLinecap="round"
+                    />
+                  )}
                 </svg>
 
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="text-3xl font-extrabold text-white tracking-tight">84</span>
-                  <span className="text-[11px] font-medium text-gray-400">Total Outputs</span>
+                  <span className="text-3xl font-extrabold text-white tracking-tight">{loading ? '...' : metrics.published}</span>
+                  <span className="text-[11px] font-medium text-gray-400">Published</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Breakdown Legend */}
-          <div className="space-y-2 pt-3 border-t border-[#1F2937]">
-            {distribution.map((item) => (
-              <div key={item.platform} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-gray-300 font-medium">{item.platform}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-white font-semibold">{item.count}</span>
-                  <span className="text-gray-500 text-[11px]">({item.percentage}%)</span>
-                </div>
-              </div>
-            ))}
+          <div className="pt-3 border-t border-[#1F2937] text-center text-xs text-gray-500">
+            {metrics.published === 0 ? "No published outputs yet" : `${metrics.published} live outputs distributed`}
           </div>
         </div>
       </div>
@@ -257,29 +247,13 @@ export default function OverviewPage() {
       {/* System Health Strip */}
       <div className="bg-[#111827]/60 border border-[#1F2937] rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]" />
-          <span className="text-xs font-semibold text-white">Self-Hosted Engine Operational</span>
-        </div>
-        <div className="flex items-center gap-6 text-xs text-gray-400">
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>Database: SQLite (Active)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>FFmpeg: Ready</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>AI: Gemini & OpenAI</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>Connected: 5/8 Platforms</span>
-          </div>
+          <div className={`w-2.5 h-2.5 rounded-full ${healthStatus === 'healthy' ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]' : 'bg-amber-400'}`} />
+          <span className="text-xs font-semibold text-white">
+            {healthStatus === 'healthy' ? 'Self-Hosted Engine Operational' : 'Telemetry Degraded / Standalone'}
+          </span>
         </div>
         <Link href="/system?tab=health" className="text-xs text-indigo-400 hover:text-indigo-300 font-medium">
-          Health Details &rarr;
+          Health Telemetry &rarr;
         </Link>
       </div>
     </div>

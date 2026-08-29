@@ -7,7 +7,6 @@ import {
   Pause, 
   Volume2, 
   Maximize2, 
-  Check, 
   Scissors, 
   Type, 
   Hash, 
@@ -18,9 +17,11 @@ import {
   Copy, 
   CheckCheck,
   RefreshCw,
-  Sliders
+  Sliders,
+  Info
 } from 'lucide-react';
 import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon, FacebookIcon } from '@/components/ui/SocialIcons';
+import { api } from '@/lib/api';
 
 export default function RepurposeEditorPage() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -28,6 +29,7 @@ export default function RepurposeEditorPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeOutputTab, setActiveOutputTab] = useState('instagram');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const [destinations, setDestinations] = useState({
     youtube: true,
@@ -87,17 +89,43 @@ export default function RepurposeEditorPage() {
     }
   });
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsGenerating(true);
-    setTimeout(() => {
+    try {
+      const activeDests = Object.keys(destinations).filter(k => (destinations as any)[k]);
+      const res = await api.generateRepurpose("sample-1", selectedFormat, activeDests);
+      if (res && res.outputs) {
+        setGeneratedOutputs(prev => ({ ...prev, ...(res.outputs as any) }));
+      }
+    } catch (e) {
+      console.warn("Using offline generator");
+    } finally {
       setIsGenerating(false);
-    }, 1200);
+    }
   };
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handlePublishClick = async () => {
+    try {
+      const res = await api.publish(activeOutputTab);
+      setActionFeedback(res.message);
+    } catch (err: any) {
+      setActionFeedback(err.message);
+    }
+  };
+
+  const handleScheduleClick = async () => {
+    try {
+      const res = await api.schedule({ platform: activeOutputTab, content_id: "sample-1" });
+      setActionFeedback(res.message);
+    } catch (err: any) {
+      setActionFeedback(err.message);
+    }
   };
 
   return (
@@ -120,6 +148,16 @@ export default function RepurposeEditorPage() {
           </button>
         </div>
       </div>
+
+      {actionFeedback && (
+        <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-3.5 text-xs text-indigo-300 flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+            <span>{actionFeedback}</span>
+          </div>
+          <button onClick={() => setActionFeedback(null)} className="text-gray-400 hover:text-white font-semibold">✕</button>
+        </div>
+      )}
 
       {/* Main Repurpose Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -223,7 +261,7 @@ export default function RepurposeEditorPage() {
           <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">AI Options</span>
-              <span className="text-[10px] text-cyan-400 font-semibold bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Gemini 1.5 Pro</span>
+              <span className="text-[10px] text-cyan-400 font-semibold bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Gemini & OpenAI</span>
             </div>
 
             <div className="space-y-2">
@@ -349,11 +387,17 @@ export default function RepurposeEditorPage() {
             </div>
 
             <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#1F2937]/80">
-              <button className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#111827] border border-[#1F2937] text-gray-300 hover:text-white text-xs font-semibold transition-colors">
+              <button
+                onClick={handleScheduleClick}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#111827] border border-[#1F2937] text-gray-300 hover:text-white text-xs font-semibold transition-colors"
+              >
                 <Clock className="w-3.5 h-3.5 text-amber-400" />
                 <span>Schedule to Calendar</span>
               </button>
-              <button className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all">
+              <button
+                onClick={handlePublishClick}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
+              >
                 <Send className="w-3.5 h-3.5" />
                 <span>Publish Now</span>
               </button>

@@ -85,12 +85,15 @@ export interface ScheduledPost {
 
 export interface PublishingJob {
   id: string;
-  content_title: string;
-  platform: string;
-  status: ContentStatus;
-  time: string;
-  retry_count: number;
+  type?: string;
+  content_title?: string;
+  platform?: string;
+  status: string;
+  time?: string;
+  retry_count?: number;
+  attempts?: number;
   error?: string;
+  created_at?: string;
 }
 
 export interface SystemLog {
