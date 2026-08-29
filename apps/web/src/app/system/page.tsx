@@ -191,6 +191,20 @@ function SystemContent() {
               </div>
               <p className="text-xs text-gray-400">{healthData.components.ai?.details || "Offline Mock Active"}</p>
             </div>
+
+            {/* Scheduler Engine Component (Phase 9) */}
+            <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Scheduler Engine</span>
+                <Clock className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.scheduler?.status || 'idle')}`}>
+                  {healthData.components.scheduler?.status || 'Active'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400">{healthData.components.scheduler?.details || "UTC Server-Side Daemon"}</p>
+            </div>
           </div>
         </div>
       )}

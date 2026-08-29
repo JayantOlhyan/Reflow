@@ -66,12 +66,23 @@ async def init_db():
                 ("platform_connections", "token_expires_at", "DATETIME"),
                 ("platform_connections", "scopes_json", "TEXT DEFAULT '[]'"),
                 ("platform_connections", "metadata_json", "TEXT DEFAULT '{}'"),
+                ("publications", "scheduled_at", "DATETIME"),
+                ("publications", "timezone", "VARCHAR(64)"),
+                ("publications", "claimed_at", "DATETIME"),
+                ("publications", "claim_owner", "VARCHAR(64)"),
+                ("publications", "cancelled_at", "DATETIME"),
+                ("publications", "failed_at", "DATETIME"),
             ]
             for tbl, col, col_def in migrations:
                 try:
                     await conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {col_def}"))
                 except Exception:
                     pass # Column already exists
+
+            try:
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_publications_status_scheduled_at ON publications (status, scheduled_at)"))
+            except Exception:
+                pass
 
         logger.info("Database schema initialized and verified successfully.")
     except Exception as e:

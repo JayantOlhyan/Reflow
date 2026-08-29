@@ -103,6 +103,17 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 - **Batch Publishing & Failure Isolation**: `POST /api/publications/batch` creates independent `Publication` and `Job` records per destination. Failures on one platform do not affect other platforms.
 - **Idempotency Hashing**: Deterministic SHA-256 payload hashing prevents duplicate uploads across retries.
 
-### 2.8 Database Layer (`apps/api/database.py`)
+### 2.8 Scheduling & Content Calendar Engine (`apps/api/services/scheduler_service.py` & `scheduler.py`)
+- **Single Source of Truth**: The `Publication` database model stores canonical UTC `scheduled_at` timestamps alongside standard IANA timezone identifiers (`zoneinfo.ZoneInfo`).
+- **Composite Index**: `Index("ix_publications_status_scheduled_at", "status", "scheduled_at")` optimizes high-frequency scheduler queries without table scanning.
+- **Standalone Scheduler Daemon**: Background process (`apps/api/scheduler.py`) running every 5 seconds, independent of HTTP web requests.
+- **Atomic Lease Claiming**: Queries due publications (`status == 'SCHEDULED' and scheduled_at <= now_utc()`) and atomically claims ownership (`claimed_at`, `claim_owner`).
+- **Crash & Stale Claim Recovery**: Claims older than 120 seconds are automatically reset to `SCHEDULED` for retry without duplicating publish jobs.
+- **Missed-Schedule Recovery**: Re-executes or handles publications that came due while the server was offline (`SCHEDULER_MISSED_POLICY="EXECUTE_IMMEDIATELY"`).
+- **Worker Queue Reuse**: Dispatches due items by transitioning status to `QUEUED` and enqueueing standard `PLATFORM_PUBLISH` jobs into the Redis queue (`reflow:media_jobs`).
+- **Content Deletion Protection**: Content deletion is blocked if future active scheduled posts exist.
+- **Calendar API**: Fast range-based queries (`GET /api/calendar`) returning localized datetime strings across Month, Week, and Day views.
+
+### 2.9 Database Layer (`apps/api/database.py`)
 - **Engine**: SQLAlchemy Async engine supporting SQLite (development) and PostgreSQL (production).
 - **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Clip`, `ClipVariant`, `PlatformConnection`, `Publication`, `Job`, `SystemLog`.
