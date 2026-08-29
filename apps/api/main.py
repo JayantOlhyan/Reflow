@@ -13,13 +13,19 @@ from typing import Dict, Any, List, Optional
 
 from config import settings
 from database import get_db, init_db
-from models.entities import Content, Asset, ContentVariant, PlatformConnection, Workflow, Job, SystemLog
+from models.entities import (
+    Content, Asset, ContentVariant, Transcript, TranscriptSegment,
+    ContentBrief, GeneratedContent, PlatformConnection, Workflow, Job, SystemLog
+)
 from models.schemas import (
     ContentResponse, ContentListResponse, TextContentCreateRequest,
-    RepurposeRequest, AICarouselPrompt, SchedulePostRequest,
-    PlatformConnectionSchema, PlatformConnectionUpdate, HealthResponse, ApiResponse
+    TranscriptResponse, ContentBriefResponse, GeneratedContentResponse,
+    AIGenerateRequest, RepurposeRequest, AICarouselPrompt, SchedulePostRequest,
+    PlatformConnectionSchema, PlatformConnectionUpdate, HealthResponse, ApiResponse,
+    JobResponse
 )
 from services.media_service import media_processor
+from services.queue_service import queue_service
 from services.ai_service import ai_service
 from services.health_service import health_service
 from services.storage_service import storage_service, validate_upload, generate_storage_key
@@ -142,7 +148,7 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
     }
 
 # ------------------------------------------------------------------------------
-# Phase 1: Real Content Ingestion & Management
+# Content Ingestion & Media Processing Pipeline
 # ------------------------------------------------------------------------------
 
 @app.post("/api/content/upload", response_model=ContentResponse, tags=["Content"])
@@ -151,11 +157,6 @@ async def upload_content(
     title: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Real multipart file upload endpoint for Video, Image, PDF, and Text files.
-    Validates file, generates collision-safe storage key, persists to storage,
-    and creates Content + Asset database records.
-    """
     filename = file.filename or "uploaded_file"
     file_bytes = await file.read()
     file_size = len(file_bytes)
@@ -181,11 +182,12 @@ async def upload_content(
 
     # 2. Persist Content + Asset in Database
     try:
+        initial_status = "PROCESSING" if detected_type == "VIDEO" else "READY"
         content = Content(
             id=content_id,
             title=content_title,
             content_type=detected_type,
-            status="READY",
+            status=initial_status,
             created_at=datetime.utcnow()
         )
         db.add(content)
@@ -201,12 +203,30 @@ async def upload_content(
         )
         db.add(asset)
 
+        job = None
+        if detected_type == "VIDEO":
+            job_id = f"job_{uuid.uuid4().hex[:12]}"
+            job = Job(
+                id=job_id,
+                content_id=content_id,
+                asset_id=asset_id,
+                type="MEDIA_PROCESSING",
+                status="QUEUED",
+                created_at=datetime.utcnow()
+            )
+            db.add(job)
+
         await db.commit()
         await db.refresh(content)
-        logger.info(f"Successfully ingested {detected_type} asset '{filename}' -> Content ID: {content_id}")
+
+        # 3. Enqueue to Background Media Worker via Redis
+        if detected_type == "VIDEO" and job:
+            await queue_service.enqueue_media_job(job.id, content_id, asset_id, job_type="MEDIA_PROCESSING")
+
+        logger.info(f"Successfully ingested {detected_type} asset '{filename}' -> Content ID: {content_id} (Status: {initial_status})")
         return content
+
     except Exception as e:
-        # Atomic Rollback: Clean up written storage file to prevent orphans
         logger.error(f"Database error saving {content_id}, rolling back storage: {e}")
         await storage_service.delete(storage_key)
         await db.rollback()
@@ -217,7 +237,6 @@ async def create_text_content(
     req: TextContentCreateRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Creates a text / markdown content asset directly."""
     content_id = f"cnt_{uuid.uuid4().hex[:12]}"
     content = Content(
         id=content_id,
@@ -233,6 +252,34 @@ async def create_text_content(
     logger.info(f"Created text content asset: {content.id} ({content.title})")
     return content
 
+@app.post("/api/content/{content_id}/reprocess", response_model=ApiResponse, tags=["Content"])
+async def reprocess_content_media(content_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Content).where(Content.id == content_id))
+    content = result.scalar_one_or_none()
+    if not content or content.content_type != "VIDEO":
+        raise HTTPException(status_code=404, detail="Video content item not found.")
+
+    if not content.assets:
+        raise HTTPException(status_code=400, detail="Content has no associated media assets.")
+
+    asset_id = content.assets[0].id
+    content.status = "PROCESSING"
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    job = Job(
+        id=job_id,
+        content_id=content_id,
+        asset_id=asset_id,
+        type="MEDIA_PROCESSING",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(job_id, content_id, asset_id, job_type="MEDIA_PROCESSING")
+    return ApiResponse(status="success", message=f"Media reprocessing queued for Content {content_id}.")
+
 @app.get("/api/content", response_model=ContentListResponse, tags=["Content"])
 async def list_content(
     page: int = Query(1, ge=1),
@@ -242,11 +289,9 @@ async def list_content(
     search: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Lists content assets with real database filtering, pagination, and search."""
     stmt = select(Content)
     count_stmt = select(func.count(Content.id))
 
-    # Apply filters
     if type and type.upper() != "ALL":
         stmt = stmt.where(Content.content_type == type.upper())
         count_stmt = count_stmt.where(Content.content_type == type.upper())
@@ -263,11 +308,9 @@ async def list_content(
         stmt = stmt.where(search_filter)
         count_stmt = count_stmt.where(search_filter)
 
-    # Total count
     total_res = await db.execute(count_stmt)
     total_count = total_res.scalar() or 0
 
-    # Paginate
     offset = (page - 1) * limit
     stmt = stmt.order_by(Content.created_at.desc()).offset(offset).limit(limit)
     result = await db.execute(stmt)
@@ -290,7 +333,6 @@ async def get_content(content_id: str, db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/content/{content_id}/asset/{asset_id}", tags=["Content"])
 async def stream_asset(content_id: str, asset_id: str, db: AsyncSession = Depends(get_db)):
-    """Safely streams an asset file with proper MIME type headers."""
     result = await db.execute(select(Asset).where(Asset.id == asset_id, Asset.content_id == content_id))
     asset = result.scalar_one_or_none()
     if not asset:
@@ -306,40 +348,179 @@ async def stream_asset(content_id: str, asset_id: str, db: AsyncSession = Depend
         filename=asset.original_filename
     )
 
+@app.get("/api/content/{content_id}/variant/{variant_id}", tags=["Content"])
+async def stream_variant(content_id: str, variant_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ContentVariant).where(ContentVariant.id == variant_id, ContentVariant.content_id == content_id))
+    variant = result.scalar_one_or_none()
+    if not variant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant file not found.")
+
+    real_path = storage_service.get_real_path(variant.storage_key)
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant file missing from disk.")
+
+    return FileResponse(
+        path=real_path,
+        media_type=variant.mime_type,
+        filename=os.path.basename(variant.storage_key)
+    )
+
 @app.delete("/api/content/{content_id}", response_model=ApiResponse, tags=["Content"])
 async def delete_content(content_id: str, db: AsyncSession = Depends(get_db)):
-    """Deletes Content record and its physical storage files safely."""
     result = await db.execute(select(Content).where(Content.id == content_id))
     content = result.scalar_one_or_none()
     if not content:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content asset not found.")
 
-    # Delete physical assets from storage
     for asset in content.assets:
         try:
             await storage_service.delete(asset.storage_key)
-        except Exception as e:
-            logger.warn(f"Could not delete physical file {asset.storage_key}: {e}")
+        except Exception:
+            pass
+
+    for variant in content.variants:
+        try:
+            await storage_service.delete(variant.storage_key)
+        except Exception:
+            pass
 
     await db.delete(content)
     await db.commit()
-    logger.info(f"Deleted Content {content_id} and cleaned up related storage files.")
-    return ApiResponse(status="success", message=f"Content {content_id} and associated assets deleted.")
+    logger.info(f"Deleted Content {content_id} and all related physical storage variants & AI outputs.")
+    return ApiResponse(status="success", message=f"Content {content_id} and all related variants deleted.")
 
 # ------------------------------------------------------------------------------
-# Repurposing & AI Platform Outputs (BYOK)
+# Phase 3 AI Content Intelligence Endpoints
 # ------------------------------------------------------------------------------
 
+@app.get("/api/content/{content_id}/transcript", response_model=TranscriptResponse, tags=["AI Intelligence"])
+async def get_transcript(content_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Transcript).where(Transcript.content_id == content_id))
+    transcript = result.scalars().first()
+    if not transcript:
+        raise HTTPException(status_code=404, detail="Transcript not found for this content.")
+    return transcript
+
+@app.get("/api/content/{content_id}/brief", response_model=ContentBriefResponse, tags=["AI Intelligence"])
+async def get_content_brief(content_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ContentBrief).where(ContentBrief.content_id == content_id))
+    brief = result.scalars().first()
+    if not brief:
+        raise HTTPException(status_code=404, detail="ContentBrief not found for this content.")
+    return ContentBriefResponse(
+        id=brief.id,
+        content_id=brief.content_id,
+        transcript_id=brief.transcript_id,
+        title=brief.title,
+        summary=brief.summary,
+        topics=brief.topics,
+        keywords=brief.keywords,
+        audience=brief.audience,
+        tone=brief.tone,
+        key_points=brief.key_points,
+        hooks=brief.hooks,
+        quotes=brief.quotes,
+        cta_suggestions=brief.cta_suggestions,
+        provider=brief.provider,
+        model=brief.model,
+        prompt_version=brief.prompt_version,
+        created_at=brief.created_at
+    )
+
+@app.get("/api/content/{content_id}/generated", response_model=List[GeneratedContentResponse], tags=["AI Intelligence"])
+async def get_generated_content(content_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(GeneratedContent)
+        .where(GeneratedContent.content_id == content_id)
+        .order_by(GeneratedContent.platform.asc(), GeneratedContent.version.desc())
+    )
+    items = result.scalars().all()
+    return [
+        GeneratedContentResponse(
+            id=g.id,
+            content_id=g.content_id,
+            brief_id=g.brief_id,
+            platform=g.platform,
+            generation_type=g.generation_type,
+            status=g.status,
+            payload=g.payload,
+            provider=g.provider,
+            model=g.model,
+            prompt_version=g.prompt_version,
+            version=g.version,
+            created_at=g.created_at
+        )
+        for g in items
+    ]
+
+@app.post("/api/content/{content_id}/generate", response_model=ApiResponse, tags=["AI Intelligence"])
+async def trigger_ai_generation(
+    content_id: str,
+    req: AIGenerateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Content).where(Content.id == content_id))
+    content = result.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content asset not found.")
+
+    asset_id = content.assets[0].id if content.assets else "text_asset"
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    job = Job(
+        id=job_id,
+        content_id=content_id,
+        asset_id=asset_id,
+        type="CONTENT_GENERATION",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(job_id, content_id, asset_id, job_type="CONTENT_GENERATION")
+    return ApiResponse(status="success", message=f"AI generation job {job_id} queued for {req.platforms}.")
+
+@app.post("/api/content/{content_id}/regenerate/{platform}", response_model=ApiResponse, tags=["AI Intelligence"])
+async def regenerate_single_platform(
+    content_id: str,
+    platform: str,
+    tone: Optional[str] = "professional",
+    db: AsyncSession = Depends(get_db)
+):
+    plt_upper = platform.upper()
+    if plt_upper not in ["LINKEDIN", "INSTAGRAM", "X", "YOUTUBE"]:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+
+    # Generate immediately in async handler or via queue
+    try:
+        await ai_service.generate_platform_content(
+            content_id=content_id,
+            platforms=[plt_upper],
+            tone=tone or "professional"
+        )
+        return ApiResponse(status="success", message=f"Successfully regenerated {plt_upper} content.")
+    except Exception as e:
+        logger.error(f"Regeneration failed for {plt_upper}: {e}")
+        raise HTTPException(status_code=500, detail=f"Regeneration failed: {str(e)}")
+
+# Legacy repurpose endpoint adapter for backward compatibility
 @app.post("/api/repurpose/generate", tags=["Repurpose"])
 async def generate_repurpose(req: RepurposeRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Content).where(Content.id == req.content_id))
     content = result.scalar_one_or_none()
-    title = content.title if content else "Untitled Content Asset"
-    
-    outputs = await ai_service.generate_platform_repurpose(
-        source_title=title,
-        destinations=req.destinations
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found.")
+
+    # Generate ContentBrief & Platform Contents
+    platforms = [d.upper() for d in req.destinations]
+    generated_items = await ai_service.generate_platform_content(
+        content_id=req.content_id,
+        platforms=platforms
     )
+    outputs = {}
+    for g in generated_items:
+        outputs[g.platform.lower()] = g.payload
+
     return {
         "content_id": req.content_id,
         "target_format": req.target_format,
@@ -347,7 +528,7 @@ async def generate_repurpose(req: RepurposeRequest, db: AsyncSession = Depends(g
     }
 
 # ------------------------------------------------------------------------------
-# Carousel Studio
+# Carousel Studio (Phase 4)
 # ------------------------------------------------------------------------------
 
 @app.post("/api/carousels/generate", tags=["Carousel"])

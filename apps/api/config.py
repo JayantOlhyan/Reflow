@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     
     # Queue / Cache (Redis)
     REDIS_URL: Optional[str] = Field(default="redis://localhost:6379/0")
+    REDIS_MEDIA_QUEUE: str = Field(default="reflow:media_jobs")
+    
+    # Media Processing Engine Configuration
+    MAX_MEDIA_RETRIES: int = Field(default=3, description="Maximum retry attempts for failed media processing")
+    MEDIA_WORKER_CONCURRENCY: int = Field(default=1, description="Number of concurrent media worker tasks")
+    FFMPEG_PATH: str = Field(default="ffmpeg", description="Path to ffmpeg binary")
+    FFPROBE_PATH: str = Field(default="ffprobe", description="Path to ffprobe binary")
     
     # AI Providers (Bring Your Own Key)
     GEMINI_API_KEY: Optional[str] = None

@@ -17,16 +17,137 @@ class AssetResponse(BaseModel):
     duration: Optional[int] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    fps: Optional[int] = None
+    codec: Optional[str] = None
+    bitrate: Optional[int] = None
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-class ContentVariantSchema(BaseModel):
+class ContentVariantResponse(BaseModel):
+    id: str
+    content_id: str
+    source_asset_id: Optional[str] = None
+    variant_type: str  # THUMBNAIL, LANDSCAPE_16_9, VERTICAL_9_16, SQUARE_1_1, PORTRAIT_4_5, ORIGINAL
+    storage_key: str
+    mime_type: str
+    file_size: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration: Optional[int] = None
+    fps: Optional[int] = None
+    codec: Optional[str] = None
+    status: str = "READY"
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+# ------------------------------------------------------------------------------
+# Phase 3 AI Intelligence Schemas
+# ------------------------------------------------------------------------------
+
+class TranscriptSegmentSchema(BaseModel):
+    sequence: int
+    start_time: float
+    end_time: float
+    text: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+class TranscriptResponse(BaseModel):
+    id: str
+    content_id: str
+    asset_id: Optional[str] = None
+    provider: str
+    language: str
+    text: str
+    duration: Optional[float] = None
+    status: str
+    created_at: Optional[datetime] = None
+    segments: List[TranscriptSegmentSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ContentBriefSchema(BaseModel):
+    title: str = Field(..., description="High-impact title synthesizing core thesis")
+    summary: str = Field(..., description="Comprehensive summary of content")
+    topics: List[str] = Field(default_factory=list)
+    keywords: List[str] = Field(default_factory=list)
+    audience: str = Field(default="Creators & Developers")
+    tone: str = Field(default="Professional & Engaging")
+    key_points: List[str] = Field(default_factory=list)
+    hooks: List[str] = Field(default_factory=list)
+    quotes: List[str] = Field(default_factory=list)
+    cta_suggestions: List[str] = Field(default_factory=list)
+
+class ContentBriefResponse(BaseModel):
+    id: str
+    content_id: str
+    transcript_id: Optional[str] = None
+    title: str
+    summary: str
+    topics: List[str] = []
+    keywords: List[str] = []
+    audience: str = "General Audience"
+    tone: str = "Professional"
+    key_points: List[str] = []
+    hooks: List[str] = []
+    quotes: List[str] = []
+    cta_suggestions: List[str] = []
+    provider: str
+    model: str
+    prompt_version: str
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Platform Generation Schemas
+class LinkedInPostSchema(BaseModel):
+    title: str
+    hook: str
+    body: str
+    key_takeaway: str
+    call_to_action: str
+    hashtags: List[str] = []
+
+class InstagramPostSchema(BaseModel):
+    hook: str
+    caption: str
+    call_to_action: str
+    hashtags: List[str] = []
+
+class XPostSchema(BaseModel):
+    post_text: str = Field(..., max_length=280)
+    character_count: int
+
+class XThreadPostSchema(BaseModel):
+    thread_title: str
+    posts: List[str] = Field(..., min_items=1)
+    total_posts: int
+
+class YouTubeChapterSchema(BaseModel):
+    timestamp: str  # MM:SS or HH:MM:SS
+    title: str
+
+class YouTubePostSchema(BaseModel):
+    title: str = Field(..., max_length=100)
+    description: str
+    tags: List[str] = []
+    chapters: List[YouTubeChapterSchema] = []
+
+class GeneratedContentResponse(BaseModel):
+    id: str
+    content_id: str
+    brief_id: Optional[str] = None
     platform: str
-    format: str
-    status: str = "DRAFT"
-    storage_path: Optional[str] = None
-    copy_text: Optional[str] = None
+    generation_type: str
+    status: str
+    payload: Dict[str, Any] = {}
+    provider: str
+    model: str
+    prompt_version: str
+    version: int
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,13 +155,16 @@ class ContentResponse(BaseModel):
     id: str
     title: str
     content_type: str  # VIDEO, IMAGE, PDF, TEXT
-    status: str        # UPLOADING, READY, FAILED
+    status: str        # UPLOADING, PROCESSING, READY, FAILED
     text_content: Optional[str] = None
     thumbnail_path: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     assets: List[AssetResponse] = []
-    variants: List[ContentVariantSchema] = []
+    variants: List[ContentVariantResponse] = []
+    transcripts: List[TranscriptResponse] = []
+    briefs: List[ContentBriefResponse] = []
+    generated_contents: List[GeneratedContentResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -54,10 +178,10 @@ class TextContentCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     text: str = Field(..., min_length=1)
 
-class ContentCreateRequest(BaseModel):
-    title: str
-    type: str = "VIDEO"
-    text_content: Optional[str] = None
+class AIGenerateRequest(BaseModel):
+    platforms: List[str] = Field(default=["LINKEDIN", "INSTAGRAM", "X", "YOUTUBE"])
+    tone: Optional[str] = Field(default="professional")
+    custom_instructions: Optional[str] = None
 
 class RepurposeRequest(BaseModel):
     content_id: str
@@ -121,13 +245,18 @@ class PlatformConnectionUpdate(BaseModel):
     connected: bool
     handle: Optional[str] = ""
 
-class JobSchema(BaseModel):
+class JobResponse(BaseModel):
     id: str
+    content_id: Optional[str] = None
+    asset_id: Optional[str] = None
     type: str
     status: str
     attempts: int = 0
+    max_attempts: int = 3
     error: Optional[str] = None
     created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
