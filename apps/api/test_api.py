@@ -10,10 +10,10 @@ sys.path.append(os.path.dirname(__file__))
 from main import app
 from database import init_db
 from services.storage_service import storage_service, validate_upload
-from connectors.youtube import YouTubeConnector
-from connectors.instagram import InstagramConnector
+from services.queue_service import queue_service
+from worker import process_single_job
 
-class TestReflowPhase1Pipeline(unittest.TestCase):
+class TestReflowPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         asyncio.run(init_db())
@@ -28,8 +28,8 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         self.assertEqual(data["service"], "Reflow API")
         self.assertIn("version", data)
 
-    def test_02_valid_video_upload(self):
-        """Verify uploading a real MP4 video creates Content and Asset records."""
+    def test_02_valid_video_upload_and_processing_state(self):
+        """Verify uploading a video immediately sets status PROCESSING and queues job."""
         fake_video = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00isomiso2mp41" + b"\x00" * 1024
         file_payload = ("test_video.mp4", io.BytesIO(fake_video), "video/mp4")
         
@@ -42,7 +42,7 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         data = res.json()
         self.assertEqual(data["title"], "Masterclass Video")
         self.assertEqual(data["content_type"], "VIDEO")
-        self.assertEqual(data["status"], "READY")
+        self.assertEqual(data["status"], "PROCESSING")
         self.assertEqual(len(data["assets"]), 1)
         
         asset = data["assets"][0]
@@ -50,7 +50,7 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         self.assertEqual(asset["mime_type"], "video/mp4")
         self.assertEqual(asset["file_size"], len(fake_video))
         
-        # Verify physical file exists on disk
+        # Verify physical original file exists on disk
         real_path = storage_service.get_real_path(asset["storage_key"])
         self.assertTrue(os.path.exists(real_path))
 
@@ -67,6 +67,7 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["content_type"], "IMAGE")
+        self.assertEqual(data["status"], "READY")
         self.assertEqual(len(data["assets"]), 1)
         self.assertEqual(data["assets"][0]["mime_type"], "image/png")
 
@@ -83,6 +84,7 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["content_type"], "PDF")
+        self.assertEqual(data["status"], "READY")
         self.assertEqual(len(data["assets"]), 1)
 
     def test_05_direct_text_content_creation(self):
@@ -124,7 +126,6 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         data = res.json()
         storage_key = data["assets"][0]["storage_key"]
         
-        # Verify storage key is isolated inside content/ directory and not written to /etc
         self.assertTrue(storage_key.startswith("content/"))
         self.assertNotIn("..", storage_key)
 
@@ -147,20 +148,17 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
 
     def test_09_content_listing_filtering_and_search(self):
         """Verify pagination, type filtering, and search in GET /api/content."""
-        # List all
         res_all = self.client.get("/api/content?page=1&limit=50")
         self.assertEqual(res_all.status_code, 200)
         data_all = res_all.json()
         self.assertGreaterEqual(data_all["total"], 1)
         self.assertIsInstance(data_all["items"], list)
 
-        # Filter by VIDEO
         res_video = self.client.get("/api/content?type=VIDEO")
         self.assertEqual(res_video.status_code, 200)
         for item in res_video.json()["items"]:
             self.assertEqual(item["content_type"], "VIDEO")
 
-        # Search by keyword
         res_search = self.client.get("/api/content?search=Masterclass")
         self.assertEqual(res_search.status_code, 200)
         self.assertTrue(any("Masterclass" in i["title"] for i in res_search.json()["items"]))
@@ -176,7 +174,6 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
         content_id = uploaded["id"]
         asset_id = uploaded["assets"][0]["id"]
 
-        # Fetch asset stream
         stream_res = self.client.get(f"/api/content/{content_id}/asset/{asset_id}")
         self.assertEqual(stream_res.status_code, 200)
         self.assertEqual(stream_res.content, fake_content)
@@ -209,10 +206,3 @@ class TestReflowPhase1Pipeline(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-    def test_12_oversized_file_rejected(self):
-        """Verify upload larger than limit is rejected."""
-        # 600MB virtual payload
-        is_valid, content_type, err = validate_upload("huge.mp4", "video/mp4", 600 * 1024 * 1024)
-        self.assertFalse(is_valid)
-        self.assertIn("exceeds maximum", err)
