@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./storage/reflow.db
+      - STORAGE_PROVIDER=local
+      - STORAGE_DIR=./storage
+    restart: unless-stopped
