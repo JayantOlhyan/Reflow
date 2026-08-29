@@ -1,5 +1,5 @@
 from typing import Dict, Any, List
-from connectors.base import BasePlatformConnector
+from connectors.base import BasePlatformConnector, not_implemented_response
 
 class YouTubeConnector(BasePlatformConnector):
     platform_id = "youtube"
@@ -9,10 +9,10 @@ class YouTubeConnector(BasePlatformConnector):
         return ["video", "shorts", "thumbnail", "description", "scheduling"]
 
     async def validate_credentials(self, credentials: Dict[str, Any]) -> bool:
-        return True
+        return False
 
     async def publish(self, media_path: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "published", "platform": "youtube", "post_id": "yt_sample_123"}
+        return not_implemented_response(self.platform_id, "publish")
 
     async def schedule(self, media_path: str, metadata: Dict[str, Any], scheduled_time: str) -> Dict[str, Any]:
-        return {"status": "scheduled", "platform": "youtube", "scheduled_time": scheduled_time}
+        return not_implemented_response(self.platform_id, "schedule")

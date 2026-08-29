@@ -1,12 +1,12 @@
 from typing import Dict, Any, List
 from connectors.base import BasePlatformConnector, not_implemented_response
 
-class LinkedInConnector(BasePlatformConnector):
-    platform_id = "linkedin"
-    platform_name = "LinkedIn"
+class FacebookConnector(BasePlatformConnector):
+    platform_id = "facebook"
+    platform_name = "Facebook"
 
     def get_capabilities(self) -> List[str]:
-        return ["text", "image", "carousel", "video", "scheduling"]
+        return ["text", "image", "video", "scheduling"]
 
     async def validate_credentials(self, credentials: Dict[str, Any]) -> bool:
         return False
