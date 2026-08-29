@@ -1,5 +1,20 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+class ApiResponse(BaseModel):
+    status: str = "success"
+    message: Optional[str] = None
+    data: Optional[Any] = None
+
+class ContentVariantSchema(BaseModel):
+    platform: str
+    format: str
+    status: str = "draft"
+    storage_path: Optional[str] = None
+    copy_text: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 class ContentItem(BaseModel):
     id: str
@@ -10,23 +25,35 @@ class ContentItem(BaseModel):
     duration: Optional[int] = None
     slide_count: Optional[int] = None
     dimensions: Optional[str] = None
-    status: str = "draft"  # draft, scheduled, published, failed, processing
-    created_at: str
+    status: str = "draft"
+    created_at: Optional[str] = None
     destinations: List[str] = []
-    variants: List[Dict[str, Any]] = []
+    variants: List[ContentVariantSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ContentCreateRequest(BaseModel):
+    title: str
+    type: str = "video"
+    source: Optional[str] = ""
+    thumbnail: Optional[str] = ""
+    duration: Optional[int] = None
+    slide_count: Optional[int] = None
+    dimensions: Optional[str] = None
+    destinations: List[str] = []
 
 class RepurposeRequest(BaseModel):
     content_id: str
-    target_format: str  # 16:9, 9:16, 1:1, 4:5
-    destinations: List[str]  # ['youtube', 'instagram', 'tiktok', 'linkedin', 'x', 'facebook']
-    ai_options: Dict[str, bool] = {
+    target_format: str = "9:16"
+    destinations: List[str] = ["instagram", "youtube", "linkedin", "x", "tiktok"]
+    ai_options: Dict[str, bool] = Field(default_factory=lambda: {
         "caption": True,
         "title": True,
         "description": True,
         "hashtags": True,
         "subtitles": False,
         "find_clips": False
-    }
+    })
     custom_prompt: Optional[str] = None
 
 class CarouselSlide(BaseModel):
@@ -43,11 +70,11 @@ class CarouselTheme(BaseModel):
     accent_color: str = "#6366F1"
     text_color: str = "#FFFFFF"
 
-class CarouselData(BaseModel):
+class CarouselDeck(BaseModel):
     id: str
     title: str
-    theme: CarouselTheme
-    slides: List[CarouselSlide]
+    theme: CarouselTheme = Field(default_factory=CarouselTheme)
+    slides: List[CarouselSlide] = []
 
 class AICarouselPrompt(BaseModel):
     topic: str
@@ -62,15 +89,37 @@ class SchedulePostRequest(BaseModel):
     format: str
     scheduled_time: str
 
+class PlatformConnectionSchema(BaseModel):
+    id: str
+    name: str
+    handle: str = ""
+    connected: bool = False
+    avatar_url: Optional[str] = ""
+    capabilities: List[str] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
 class PlatformConnectionUpdate(BaseModel):
     id: str
     connected: bool
     handle: Optional[str] = ""
 
-class WorkflowModel(BaseModel):
+class JobSchema(BaseModel):
     id: str
-    name: str
-    active: bool = True
-    description: str
-    trigger: str
-    nodes: List[Dict[str, Any]]
+    type: str
+    status: str
+    attempts: int = 0
+    error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class HealthComponentStatus(BaseModel):
+    status: str  # healthy | degraded | unavailable | not_configured
+    details: Optional[str] = None
+
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: str
+    components: Dict[str, HealthComponentStatus]
