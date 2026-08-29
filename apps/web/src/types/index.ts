@@ -73,6 +73,67 @@ export interface GeneratedContent {
   created_at?: string;
 }
 
+export interface SlideElementItem {
+  id: string;
+  slide_id: string;
+  type: string;
+  position_x: number;
+  position_y: number;
+  width: number;
+  height: number;
+  content: string;
+  style: any;
+  z_index: number;
+}
+
+export interface CarouselSlideItem {
+  id: string;
+  carousel_id: string;
+  position: number;
+  purpose: string;
+  layout: string;
+  headline: string;
+  body: string;
+  tag?: string;
+  background: string;
+  created_at?: string;
+  updated_at?: string;
+  elements?: SlideElementItem[];
+}
+
+export interface CarouselExportItem {
+  id: string;
+  carousel_id: string;
+  carousel_version: number;
+  format: string; // PNG, JPG, PDF
+  storage_key: string;
+  file_size: number;
+  status: string;
+  created_at?: string;
+}
+
+export interface CarouselItem {
+  id: string;
+  content_id?: string;
+  title: string;
+  status: string;
+  aspect_ratio: string;
+  template: string;
+  slide_count: number;
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+  slides: CarouselSlideItem[];
+  exports?: CarouselExportItem[];
+}
+
+export interface CarouselListResponse {
+  items: CarouselItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface Asset {
   id: string;
   content_id: string;
@@ -104,6 +165,7 @@ export interface ContentItem {
   transcripts?: Transcript[];
   briefs?: ContentBrief[];
   generated_contents?: GeneratedContent[];
+  carousels?: CarouselItem[];
 }
 
 export interface ContentListResponse {

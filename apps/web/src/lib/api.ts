@@ -1,6 +1,7 @@
 import { 
   ContentItem, ContentListResponse, SocialAccount, PublishingJob, 
-  SystemLog, Transcript, ContentBrief, GeneratedContent 
+  SystemLog, Transcript, ContentBrief, GeneratedContent,
+  CarouselItem, CarouselListResponse, CarouselSlideItem
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -125,6 +126,86 @@ class ApiClient {
     });
   }
 
+  // Phase 4 Carousel Engine API
+  async getCarousels(page: number = 1, limit: number = 20): Promise<CarouselListResponse> {
+    return this.request<CarouselListResponse>(`/api/carousels?page=${page}&limit=${limit}`);
+  }
+
+  async getCarousel(carouselId: string): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}`);
+  }
+
+  async createCarousel(title: string, template: string = "MINIMAL", contentId?: string): Promise<CarouselItem> {
+    return this.request<CarouselItem>('/api/carousels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, template, content_id: contentId })
+    });
+  }
+
+  async updateCarousel(carouselId: string, data: { title?: string; template?: string; aspect_ratio?: string }): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteCarousel(carouselId: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/carousels/${carouselId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async generateCarouselAI(carouselId: string, slideCount: number = 5, template: string = "MINIMAL", customPrompt?: string) {
+    return this.request<{ status: string; message: string }>(`/api/carousels/${carouselId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slide_count: slideCount, template, custom_prompt: customPrompt })
+    });
+  }
+
+  async addSlide(carouselId: string, headline: string, body: string, tag?: string): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}/slides`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headline, body, tag })
+    });
+  }
+
+  async updateSlide(carouselId: string, slideId: string, data: { headline?: string; body?: string; tag?: string; layout?: string; background?: string }): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}/slides/${slideId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteSlide(carouselId: string, slideId: string): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}/slides/${slideId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async reorderSlides(carouselId: string, slideIds: string[]): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}/slides/reorder`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slide_ids: slideIds })
+    });
+  }
+
+  async renderCarousel(carouselId: string): Promise<{ status: string; message: string; data: any }> {
+    return this.request<{ status: string; message: string; data: any }>(`/api/carousels/${carouselId}/render`, {
+      method: 'POST'
+    });
+  }
+
+  getExportDownloadUrl(carouselId: string, exportId: string): string {
+    return `${this.baseUrl}/api/carousels/${carouselId}/export/${exportId}`;
+  }
+
+  // Legacy Adapters
   async generateRepurpose(contentId: string, targetFormat: string, destinations: string[]) {
     return this.request<{
       content_id: string;
