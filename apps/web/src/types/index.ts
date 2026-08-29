@@ -1,12 +1,76 @@
 export type ContentType = 'VIDEO' | 'IMAGE' | 'PDF' | 'TEXT' | 'CAROUSEL' | 'video' | 'image' | 'pdf' | 'text' | 'carousel';
-export type ContentStatus = 'UPLOADING' | 'READY' | 'FAILED' | 'DRAFT' | 'draft' | 'processing' | 'scheduled' | 'published' | 'failed';
+export type ContentStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED' | 'DRAFT' | 'draft' | 'processing' | 'scheduled' | 'published' | 'failed';
 
 export interface ContentVariant {
-  platform: string;
-  format: string;
+  id: string;
+  content_id: string;
+  source_asset_id?: string;
+  variant_type: string;  // THUMBNAIL, LANDSCAPE_16_9, VERTICAL_9_16, SQUARE_1_1, PORTRAIT_4_5, ORIGINAL
+  storage_key: string;
+  mime_type: string;
+  file_size: number;
+  width?: number;
+  height?: number;
+  duration?: number;
+  fps?: number;
+  codec?: string;
   status: string;
-  storage_path?: string;
-  copy?: string;
+  created_at?: string;
+}
+
+export interface TranscriptSegment {
+  sequence: number;
+  start_time: number;
+  end_time: number;
+  text: string;
+}
+
+export interface Transcript {
+  id: string;
+  content_id: string;
+  asset_id?: string;
+  provider: string;
+  language: string;
+  text: string;
+  duration?: number;
+  status: string;
+  created_at?: string;
+  segments: TranscriptSegment[];
+}
+
+export interface ContentBrief {
+  id: string;
+  content_id: string;
+  transcript_id?: string;
+  title: string;
+  summary: string;
+  topics: string[];
+  keywords: string[];
+  audience: string;
+  tone: string;
+  key_points: string[];
+  hooks: string[];
+  quotes: string[];
+  cta_suggestions: string[];
+  provider: string;
+  model: string;
+  prompt_version: string;
+  created_at?: string;
+}
+
+export interface GeneratedContent {
+  id: string;
+  content_id: string;
+  brief_id?: string;
+  platform: string;       // LINKEDIN, INSTAGRAM, X, YOUTUBE
+  generation_type: string;
+  status: string;
+  payload: any;           // Platform specific payload
+  provider: string;
+  model: string;
+  prompt_version: string;
+  version: number;
+  created_at?: string;
 }
 
 export interface Asset {
@@ -19,6 +83,9 @@ export interface Asset {
   duration?: number;
   width?: number;
   height?: number;
+  fps?: number;
+  codec?: string;
+  bitrate?: number;
   created_at?: string;
 }
 
@@ -34,6 +101,9 @@ export interface ContentItem {
   assets?: Asset[];
   destinations?: string[];
   variants?: ContentVariant[];
+  transcripts?: Transcript[];
+  briefs?: ContentBrief[];
+  generated_contents?: GeneratedContent[];
 }
 
 export interface ContentListResponse {
@@ -104,6 +174,7 @@ export interface ScheduledPost {
 
 export interface PublishingJob {
   id: string;
+  content_id?: string;
   type?: string;
   content_title?: string;
   platform?: string;

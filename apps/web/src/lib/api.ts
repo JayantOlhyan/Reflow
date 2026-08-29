@@ -1,4 +1,7 @@
-import { ContentItem, ContentListResponse, SocialAccount, PublishingJob, SystemLog } from '@/types';
+import { 
+  ContentItem, ContentListResponse, SocialAccount, PublishingJob, 
+  SystemLog, Transcript, ContentBrief, GeneratedContent 
+} from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -52,6 +55,10 @@ class ApiClient {
     return this.request<ContentListResponse>(endpoint);
   }
 
+  async getContent(id: string): Promise<ContentItem> {
+    return this.request<ContentItem>(`/api/content/${id}`);
+  }
+
   async uploadFile(file: File, title?: string): Promise<ContentItem> {
     const formData = new FormData();
     formData.append('file', file);
@@ -71,6 +78,12 @@ class ApiClient {
     });
   }
 
+  async reprocessMedia(contentId: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/content/${contentId}/reprocess`, {
+      method: 'POST'
+    });
+  }
+
   async deleteContent(id: string): Promise<{ status: string; message: string }> {
     return this.request<{ status: string; message: string }>(`/api/content/${id}`, {
       method: 'DELETE'
@@ -81,11 +94,42 @@ class ApiClient {
     return `${this.baseUrl}/api/content/${contentId}/asset/${assetId}`;
   }
 
+  getVariantUrl(contentId: string, variantId: string): string {
+    return `${this.baseUrl}/api/content/${contentId}/variant/${variantId}`;
+  }
+
+  // Phase 3 AI Intelligence Methods
+  async getTranscript(contentId: string): Promise<Transcript> {
+    return this.request<Transcript>(`/api/content/${contentId}/transcript`);
+  }
+
+  async getContentBrief(contentId: string): Promise<ContentBrief> {
+    return this.request<ContentBrief>(`/api/content/${contentId}/brief`);
+  }
+
+  async getGeneratedContent(contentId: string): Promise<GeneratedContent[]> {
+    return this.request<GeneratedContent[]>(`/api/content/${contentId}/generated`);
+  }
+
+  async triggerAiGeneration(contentId: string, platforms: string[] = ["LINKEDIN", "INSTAGRAM", "X", "YOUTUBE"], tone: string = "professional") {
+    return this.request<{ status: string; message: string }>(`/api/content/${contentId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platforms, tone })
+    });
+  }
+
+  async regeneratePlatform(contentId: string, platform: string, tone: string = "professional") {
+    return this.request<{ status: string; message: string }>(`/api/content/${contentId}/regenerate/${platform}?tone=${tone}`, {
+      method: 'POST'
+    });
+  }
+
   async generateRepurpose(contentId: string, targetFormat: string, destinations: string[]) {
     return this.request<{
       content_id: string;
       target_format: string;
-      outputs: Record<string, { title: string; caption: string; hashtags: string; format: string }>;
+      outputs: Record<string, any>;
     }>('/api/repurpose/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

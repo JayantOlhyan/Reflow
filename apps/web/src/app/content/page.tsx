@@ -20,10 +20,10 @@ import {
   FileCode,
   AlertCircle,
   CheckCircle2,
-  Play
+  Play,
+  RotateCcw
 } from 'lucide-react';
 import { ContentItem } from '@/types';
-import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon } from '@/components/ui/SocialIcons';
 import { api } from '@/lib/api';
 
 export default function ContentLibraryPage() {
@@ -43,6 +43,28 @@ export default function ContentLibraryPage() {
   useEffect(() => {
     loadContent();
   }, [activeTab, searchQuery]);
+
+  // Active Polling when any item is in PROCESSING state
+  useEffect(() => {
+    const hasProcessing = items.some(i => i.status?.toUpperCase() === 'PROCESSING');
+    if (!hasProcessing) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.getContentList({
+          type: activeTab === 'draft' ? undefined : activeTab,
+          status: activeTab === 'draft' ? 'DRAFT' : undefined,
+          search: searchQuery || undefined
+        });
+        setItems(res.items || []);
+        setTotalCount(res.total || 0);
+      } catch (e) {
+        console.warn("Polling error:", e);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [items, activeTab, searchQuery]);
 
   const loadContent = async () => {
     try {
@@ -74,6 +96,13 @@ export default function ContentLibraryPage() {
     if (!bytes) return null;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return null;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,8 +143,17 @@ export default function ContentLibraryPage() {
     }
   };
 
+  const handleReprocess = async (id: string) => {
+    try {
+      await api.reprocessMedia(id);
+      await loadContent();
+    } catch (err: any) {
+      alert(`Reprocess failed: ${err.message}`);
+    }
+  };
+
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this asset? Physical files will be removed.")) return;
+    if (!confirm("Are you sure you want to delete this asset? Original and all generated variants will be permanently removed.")) return;
     try {
       await api.deleteContent(id);
       setItems(items.filter(item => item.id !== id));
@@ -127,30 +165,45 @@ export default function ContentLibraryPage() {
 
   const renderAssetThumbnail = (item: ContentItem) => {
     const primaryAsset = item.assets && item.assets[0];
-    const assetUrl = primaryAsset ? api.getAssetUrl(item.id, primaryAsset.id) : null;
     const cType = (item.content_type || item.type || '').toUpperCase();
+    const isProcessing = item.status?.toUpperCase() === 'PROCESSING';
 
-    if (cType === 'IMAGE' && assetUrl) {
+    // Check for generated thumbnail variant
+    const thumbVariant = item.variants?.find(v => v.variant_type === 'THUMBNAIL');
+    const thumbUrl = thumbVariant ? api.getVariantUrl(item.id, thumbVariant.id) : null;
+
+    if (thumbUrl) {
       return (
         <img
-          src={assetUrl}
+          src={thumbUrl}
           alt={item.title}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
       );
     }
 
+    if (cType === 'IMAGE') {
+      const assetUrl = primaryAsset ? api.getAssetUrl(item.id, primaryAsset.id) : null;
+      if (assetUrl) {
+        return (
+          <img
+            src={assetUrl}
+            alt={item.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          />
+        );
+      }
+    }
+
     if (cType === 'VIDEO') {
       return (
         <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#161B26] via-[#111827] to-[#0B0D12] text-gray-400 group-hover:text-indigo-400 transition-colors relative">
           <div className="w-10 h-10 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 group-hover:scale-110 transition-transform">
-            <Play className="w-4 h-4 ml-0.5" />
+            {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" /> : <Play className="w-4 h-4 ml-0.5" />}
           </div>
-          {primaryAsset?.original_filename && (
-            <span className="text-[10px] text-gray-500 font-mono mt-2 truncate max-w-[80%]">
-              {primaryAsset.original_filename}
-            </span>
-          )}
+          <span className="text-[10px] text-gray-400 font-mono mt-2 truncate max-w-[80%]">
+            {isProcessing ? "Generating Variants (9:16, 1:1, 4:5)..." : primaryAsset?.original_filename || 'Video Asset'}
+          </span>
         </div>
       );
     }
@@ -194,7 +247,7 @@ export default function ContentLibraryPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Content Library</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Real ingested source media, documents, and notes.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Real ingested source media, documents, and generated aspect ratio variants.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -274,6 +327,11 @@ export default function ContentLibraryPage() {
           {items.map((item) => {
             const primaryAsset = item.assets && item.assets[0];
             const cType = (item.content_type || item.type || '').toUpperCase();
+            const statusUpper = item.status?.toUpperCase();
+            const isProcessing = statusUpper === 'PROCESSING';
+            const isFailed = statusUpper === 'FAILED';
+            const variantsCount = item.variants?.filter(v => v.variant_type !== 'THUMBNAIL').length || 0;
+
             return (
               <div
                 key={item.id}
@@ -299,8 +357,24 @@ export default function ContentLibraryPage() {
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
 
-                  <div className="absolute bottom-2.5 right-2.5 bg-[#0B0D12]/90 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-medium text-gray-300">
-                    {primaryAsset?.file_size ? formatFileSize(primaryAsset.file_size) : item.status}
+                  <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
+                    {isProcessing ? (
+                      <span className="bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-semibold animate-pulse">
+                        Processing...
+                      </span>
+                    ) : isFailed ? (
+                      <button
+                        onClick={() => handleReprocess(item.id)}
+                        className="bg-rose-500/20 text-rose-400 border border-rose-500/30 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 hover:bg-rose-500/30"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Failed (Retry)</span>
+                      </button>
+                    ) : (
+                      <span className="bg-[#0B0D12]/90 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-medium text-gray-300">
+                        {primaryAsset?.duration ? formatDuration(primaryAsset.duration) : primaryAsset?.file_size ? formatFileSize(primaryAsset.file_size) : 'Ready'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -309,9 +383,15 @@ export default function ContentLibraryPage() {
                     <h3 className="text-xs font-semibold text-white line-clamp-1 group-hover:text-indigo-300 transition-colors">
                       {item.title}
                     </h3>
-                    <p className="text-[11px] text-gray-400 mt-1 truncate">
-                      {primaryAsset?.original_filename || item.id}
-                    </p>
+                    <div className="flex items-center gap-2 text-[11px] text-gray-400 mt-1">
+                      {primaryAsset?.width && primaryAsset?.height ? (
+                        <span>{primaryAsset.width}x{primaryAsset.height}</span>
+                      ) : null}
+                      {primaryAsset?.fps ? <span>• {primaryAsset.fps}fps</span> : null}
+                      {variantsCount > 0 ? (
+                        <span className="text-emerald-400 font-semibold">• {variantsCount} Variants</span>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="pt-2 border-t border-[#1F2937]/70 flex items-center justify-between">
@@ -324,7 +404,7 @@ export default function ContentLibraryPage() {
                       className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 text-indigo-300 hover:text-white text-[11px] font-medium transition-all"
                     >
                       <Sparkles className="w-3 h-3" />
-                      <span>Repurpose</span>
+                      <span>Studio</span>
                     </Link>
                   </div>
                 </div>
@@ -458,7 +538,7 @@ export default function ContentLibraryPage() {
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all disabled:opacity-50 flex items-center gap-1.5"
                 >
                   {isUploading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{isUploading ? "Uploading & Persisting..." : "Save Content"}</span>
+                  <span>{isUploading ? "Uploading & Enqueueing..." : "Save Content"}</span>
                 </button>
               </div>
             </form>
