@@ -83,6 +83,26 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 - **Rasterizer**: Produces high-resolution 1080x1080 PNG slide images and compiles standard multi-page PDF documents.
 - **Storage**: Persistent storage under `content/{content_id}/carousels/{carousel_id}/` with secure streaming via `/api/carousels/{id}/export/{export_id}`.
 
-### 2.6 Database Layer (`apps/api/database.py`)
+### 2.6 Caption & Subtitle Engine (`apps/api/services/caption_service.py`)
+- **Segmentation & Time Shifting**: Aligns transcript segments with clip time ranges $[start\_time, end\_time]$ and partitions long sentences into punchy 1–4 word beats with sub-second timing.
+- **Styling Presets**: Four distinct themes (`BOLD_PUNCH`, `CLEAN_SUBTITLE`, `KINETIC_HIGHLIGHT`, `MINIMAL_WHITE`) with word-level highlight tags.
+- **Safe-Area Layouts**: Aspect-ratio safe margins (`9:16` at $260–320\text{px}$, `1:1` at $80–90\text{px}$, `4:5` at $110–130\text{px}$, `16:9` at $50–70\text{px}$) to avoid TikTok, Reels, and Shorts UI overlap.
+- **Burning Engine & Preservation**: Generates RGBA overlays, burns subtitles via FFmpeg while strictly preserving clean variants, and validates outputs via FFprobe.
+- **Exports**: RFC-compliant SubRip (`.srt`) and WebVTT (`.vtt`) streaming and download endpoints.
+
+### 2.7 Multi-Platform Publishing Engine (`apps/api/services/publishing_service.py` & `connectors/`)
+- **Credential Encryption**: Server-side symmetric AES-256 / Fernet encryption (`ENCRYPTION_SECRET`) protecting OAuth access and refresh tokens at rest with zero exposure to frontend or logs.
+- **Universal Connectors**:
+  - **YouTube**: Resumable video uploads (`uploadType=resumable`), privacy controls (`PRIVATE`/`UNLISTED`/`PUBLIC`), channel profile lookup.
+  - **Instagram**: 3-stage Graph API Reels container creation, status polling (`FINISHED`), photo & carousel post publishing.
+  - **LinkedIn**: 2-stage UGC media upload, text feed posts, and member identity resolution.
+  - **X (Twitter)**: API v2 tweet publication, character limit verification ($\le 280$), and media uploads.
+  - **Facebook**: Meta Pages API feed and video publishing.
+  - **TikTok, Pinterest, Threads**: Declared capabilities and standard publishing contracts.
+- **Multi-Modal Routing**: Automatically routes content variants (original video, vertical clip, captioned MP4, slide PNG deck, PDF document, or text copy) to the matching platform connector.
+- **Batch Publishing & Failure Isolation**: `POST /api/publications/batch` creates independent `Publication` and `Job` records per destination. Failures on one platform do not affect other platforms.
+- **Idempotency Hashing**: Deterministic SHA-256 payload hashing prevents duplicate uploads across retries.
+
+### 2.8 Database Layer (`apps/api/database.py`)
 - **Engine**: SQLAlchemy Async engine supporting SQLite (development) and PostgreSQL (production).
-- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Clip`, `ClipVariant`, `Job`, `SystemLog`.
+- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Clip`, `ClipVariant`, `PlatformConnection`, `Publication`, `Job`, `SystemLog`.

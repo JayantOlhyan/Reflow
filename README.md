@@ -25,17 +25,18 @@
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
+| **Multi-Platform Publishing Engine** | ✅ Implemented (Phase 8) | Universal connector architecture covering YouTube, Instagram (Reels, photos, carousels), LinkedIn (text, video UGC posts), X (API v2 tweets), Facebook Pages, TikTok, Pinterest, and Threads with AES-256 encrypted tokens at rest, multi-destination batch publishing (`/api/publications/batch`), independent failure isolation, SHA-256 idempotency, and Repurpose Studio multi-platform publishing modal. |
+| **Captions & Subtitle Polish** | ✅ Implemented (Phase 6) | Short-form transcript cue alignment, 1–4 word punchy beat chunking, styling presets (`BOLD_PUNCH`, `CLEAN_SUBTITLE`, `KINETIC_HIGHLIGHT`, `MINIMAL_WHITE`), keyword highlight formatting, safe-area margin calculation for Reels/TikTok/Shorts, FFmpeg burned captions, clean clip preservation, live synchronized player overlay, and SRT/VTT exports. |
 | **Intelligent Clip Engine** | ✅ Implemented (Phase 5) | Relational `Clip` & `ClipVariant` models, transcript boundary snapping ($\pm 3.5\text{s}$), non-maximum overlap suppression, 50–100 quality scoring, frame-accurate FFmpeg extraction (`-avoid_negative_ts make_zero`), `9:16` / `1:1` / `4:5` / `16:9` variants, centered thumbnail extraction, and Repurpose Studio timeline fine-tuning. |
 | **Carousel & Content Creation** | ✅ Implemented (Phase 4) | Relational `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport` tables, AI planner, design templates (`MINIMAL`, `EDITORIAL`, `BOLD`, `EDUCATIONAL`), 1080x1080 PNG & multi-page PDF renderer, slide reordering, versioning, and Carousel Studio UI. |
 | **AI Content Intelligence** | ✅ Implemented (Phase 3) | Audio extraction, timestamped transcription, `ContentBrief` extraction, platform-specific copies (LinkedIn, Instagram, X threads, YouTube chapters), prompt versioning, and validation. |
 | **Real Media Engine** | ✅ Implemented (Phase 2) | Asynchronous Redis worker, real FFprobe metadata extraction, FFmpeg variant generation (9:16, 1:1, 4:5, 16:9, Thumbnail), atomic persistence, and streaming. |
 | **Real Content Ingestion** | ✅ Implemented (Phase 1) | Real multipart upload for Video (`.mp4`, `.mov`, `.webm`, `.mkv`), Image (`.png`, `.jpg`, `.webp`), PDF (`.pdf`), and Text (`.txt`, `.md`, inline notes). |
 | **Storage & Persistence** | ✅ Implemented (Phase 1) | `BaseStorageService` / `LocalStorageService` with path traversal defense, collision-safe keys (`content/{id}/original/{asset_id}.ext`), and orphan rollback. |
-| **Content Library & Previews** | ✅ Implemented (Phase 1–5) | Real Content 1 $\rightarrow$ N Asset $\rightarrow$ N Variant $\rightarrow$ N AI Outputs $\rightarrow$ N Carousels $\rightarrow$ N Clips, live processing polling, and Repurpose Studio. |
-| **Database & Models** | ✅ Implemented (Phase 0–5) | SQLAlchemy async engine (SQLite dev / PostgreSQL prod), relational tables with foreign-key cascade deletion. |
+| **Content Library & Previews** | ✅ Implemented (Phase 1–8) | Real Content 1 $\rightarrow$ N Asset $\rightarrow$ N Variant $\rightarrow$ N AI Outputs $\rightarrow$ N Carousels $\rightarrow$ N Clips & Captioned Variants $\rightarrow$ N Publications, live processing polling, and Repurpose Studio. |
+| **Database & Models** | ✅ Implemented (Phase 0–8) | SQLAlchemy async engine (SQLite dev / PostgreSQL prod), relational tables with foreign-key cascade deletion. |
 | **Health Telemetry** | ✅ Implemented (Phase 0) | Active component checks for Database, Storage, FFmpeg, and AI keys. |
-| **Publishing Connectors** | 🟡 Prototype / Mock (Phase 6) | Standard connector architecture with explicit `not_implemented` status responses. |
-| **Workflow Engine** | 🟡 Visual Prototype (Phase 7) | Interactive node graph simulator; DAG execution engine scheduled for Phase 7. |
+| **Workflow Engine** | 🟡 Visual Prototype (Phase 9) | Interactive node graph simulator; DAG execution engine scheduled for Phase 9. |
 
 ---
 
