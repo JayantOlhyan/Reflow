@@ -220,6 +220,20 @@ function SystemContent() {
               </div>
               <p className="text-xs text-gray-400">{healthData.components.analytics?.details || "Async Metric Ingestion & Snapshots"}</p>
             </div>
+
+            {/* Content Intelligence Engine Component (Phase 11) */}
+            <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Content Intelligence</span>
+                <Sparkles className="w-4 h-4 text-primary" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.intelligence?.status || 'healthy')}`}>
+                  {healthData.components.intelligence?.status || 'Active'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400">{healthData.components.intelligence?.details || "Pattern Detection & Anti-Hallucination Recs"}</p>
+            </div>
           </div>
         </div>
       )}

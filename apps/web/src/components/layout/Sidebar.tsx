@@ -12,6 +12,7 @@ import {
   Calendar,
   Share2,
   BarChart3,
+  Lightbulb,
   Settings,
   FileText,
   Layers,
@@ -30,6 +31,7 @@ export const Sidebar: React.FC = () => {
     { name: 'Calendar', href: '/calendar', icon: Calendar },
     { name: 'Connections', href: '/connections', icon: Share2 },
     { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+    { name: 'Intelligence', href: '/intelligence', icon: Lightbulb },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 

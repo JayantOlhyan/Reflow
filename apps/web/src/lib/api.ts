@@ -551,6 +551,57 @@ class ApiClient {
     return `${this.baseUrl}/api/analytics/export?${query.toString()}`;
   }
 
+  // Phase 11: Content Intelligence & Recommendations
+  async getIntelligenceOverview(): Promise<import('@/types').IntelligenceOverview> {
+    return this.request<import('@/types').IntelligenceOverview>('/api/intelligence/overview');
+  }
+
+  async getIntelligenceInsights(scope?: string): Promise<import('@/types').PerformanceInsight[]> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+    return this.request<import('@/types').PerformanceInsight[]>(`/api/intelligence/insights${query}`);
+  }
+
+  async getContentRecommendations(status: string = 'ACTIVE', type?: string): Promise<import('@/types').ContentRecommendation[]> {
+    const params = new URLSearchParams({ status });
+    if (type) params.set('type', type);
+    return this.request<import('@/types').ContentRecommendation[]>(`/api/intelligence/recommendations?${params.toString()}`);
+  }
+
+  async getContentPatterns(pattern_type?: string): Promise<import('@/types').ContentPattern[]> {
+    const query = pattern_type ? `?pattern_type=${encodeURIComponent(pattern_type)}` : '';
+    return this.request<import('@/types').ContentPattern[]>(`/api/intelligence/patterns${query}`);
+  }
+
+  async getTopicPerformance(): Promise<import('@/types').TopicPerformanceItem[]> {
+    return this.request<import('@/types').TopicPerformanceItem[]>('/api/intelligence/topics');
+  }
+
+  async getHookPerformance(): Promise<import('@/types').HookPerformanceItem[]> {
+    return this.request<import('@/types').HookPerformanceItem[]>('/api/intelligence/hooks');
+  }
+
+  async getDurationPerformance(): Promise<import('@/types').DurationPerformanceItem[]> {
+    return this.request<import('@/types').DurationPerformanceItem[]>('/api/intelligence/durations');
+  }
+
+  async getPostingWindows(): Promise<import('@/types').PostingWindowItem[]> {
+    return this.request<import('@/types').PostingWindowItem[]>('/api/intelligence/posting-windows');
+  }
+
+  async getContentGaps(): Promise<import('@/types').ContentGapItem[]> {
+    return this.request<import('@/types').ContentGapItem[]>('/api/intelligence/content-gaps');
+  }
+
+  async getExperiments(): Promise<import('@/types').Experiment[]> {
+    return this.request<import('@/types').Experiment[]>('/api/intelligence/experiments');
+  }
+
+  async refreshIntelligence(): Promise<import('@/types').IntelligenceRefreshResponse> {
+    return this.request<import('@/types').IntelligenceRefreshResponse>('/api/intelligence/refresh', {
+      method: 'POST'
+    });
+  }
+
   async publish(platform: string) {
     return this.request<{ status: string; message: string; platform: string }>('/api/publish', {
       method: 'POST',

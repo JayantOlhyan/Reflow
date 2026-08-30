@@ -539,3 +539,134 @@ export interface ContentAnalyticsItem {
   top_platform?: string | null;
   latest_published_at?: string | null;
 }
+
+// Phase 11: Content Intelligence & Recommendation Interfaces
+export interface PerformanceInsight {
+  id: string;
+  type: string;
+  scope: string;
+  platform?: string | null;
+  title: string;
+  description: string;
+  evidence: Record<string, any>;
+  sample_size: number;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT_DATA';
+  source_metric: string;
+  baseline_value?: number | null;
+  observed_value?: number | null;
+  delta_pct?: number | null;
+  created_at: string;
+}
+
+export interface ContentPattern {
+  id: string;
+  pattern_type: string;
+  feature_name: string;
+  feature_value: string;
+  sample_size: number;
+  median_views?: number | null;
+  median_engagement_rate?: number | null;
+  correlation_ratio?: number | null;
+  is_positive: boolean;
+  evidence: Record<string, any>;
+  created_at: string;
+}
+
+export interface ContentRecommendation {
+  id: string;
+  type: string;
+  scope: string;
+  platform?: string | null;
+  title: string;
+  recommendation_text: string;
+  why_text: string;
+  action_type?: string | null;
+  action_payload: Record<string, any>;
+  evidence: Record<string, any>;
+  sample_size: number;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT_DATA';
+  status: 'ACTIVE' | 'DISMISSED' | 'APPLIED';
+  created_at: string;
+}
+
+export interface Experiment {
+  id: string;
+  title: string;
+  hypothesis: string;
+  variable_tested: string;
+  control_baseline?: number | null;
+  success_metric: string;
+  target_sample_size: number;
+  current_sample_size: number;
+  status: 'DRAFT' | 'RUNNING' | 'CONCLUDED' | 'ABANDONED';
+  results: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TopicPerformanceItem {
+  topic: string;
+  sample_size: number;
+  median_views?: number | null;
+  median_engagement_rate?: number | null;
+  best_post_title?: string | null;
+  best_post_id?: string | null;
+  performance_vs_baseline_pct?: number | null;
+  confidence: string;
+}
+
+export interface HookPerformanceItem {
+  hook_type: string;
+  sample_size: number;
+  median_views?: number | null;
+  median_engagement_rate?: number | null;
+  performance_vs_baseline_pct?: number | null;
+  confidence: string;
+}
+
+export interface DurationPerformanceItem {
+  bucket: string;
+  sample_size: number;
+  median_views?: number | null;
+  median_engagement_rate?: number | null;
+  performance_vs_baseline_pct?: number | null;
+  confidence: string;
+}
+
+export interface PostingWindowItem {
+  day_of_week: string;
+  hour_bucket: string;
+  sample_size: number;
+  median_engagement_rate?: number | null;
+  performance_vs_baseline_pct?: number | null;
+  confidence: string;
+}
+
+export interface ContentGapItem {
+  topic: string;
+  existing_posts_count: number;
+  missing_format: string;
+  opportunity_reason: string;
+  topic_median_engagement_rate?: number | null;
+  action_type: string;
+  action_payload: Record<string, any>;
+}
+
+export interface IntelligenceOverview {
+  total_analyzed_posts: number;
+  account_baseline_engagement_rate?: number | null;
+  account_baseline_views?: number | null;
+  is_sufficient_data: boolean;
+  minimum_samples_required: number;
+  last_analyzed_at?: string | null;
+  is_stale: boolean;
+  top_recommendations: ContentRecommendation[];
+  key_insights: PerformanceInsight[];
+  content_gaps: ContentGapItem[];
+}
+
+export interface IntelligenceRefreshResponse {
+  status: string;
+  job_id: string;
+  message: string;
+}
