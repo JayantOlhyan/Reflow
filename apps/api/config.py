@@ -187,6 +187,20 @@ class Settings(BaseSettings):
         description="Cooldown in seconds between manual user-initiated analytics refresh requests"
     )
 
+    # Phase 11: Content Intelligence & Recommendation Configuration
+    MIN_RECOMMENDATION_SAMPLES: int = Field(
+        default=5,
+        description="Minimum publication samples required to produce account-specific recommendations"
+    )
+    INTELLIGENCE_STALE_AFTER_HOURS: int = Field(
+        default=24,
+        description="Hours after which intelligence insights are considered stale"
+    )
+    OUTLIER_TRIM_PERCENTILE: float = Field(
+        default=0.05,
+        description="Fraction of top and bottom performance distribution to trim for robust baseline calculation"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

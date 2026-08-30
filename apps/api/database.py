@@ -87,6 +87,10 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_publications_status_scheduled_at ON publications (status, scheduled_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_snapshots_pub_captured ON post_metric_snapshots (publication_id, captured_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_snapshots_platform_captured ON post_metric_snapshots (platform, captured_at)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_insights_type_scope ON performance_insights (type, scope)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_patterns_type_feature ON content_patterns (pattern_type, feature_name)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recs_type_status ON content_recommendations (type, status)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_exp_status ON experiments (status)"))
             except Exception:
                 pass
 

@@ -482,3 +482,99 @@ class SystemLog(Base):
     service = Column(String(64), default="System")
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+# ------------------------------------------------------------------------------
+# Phase 11: Content Intelligence & Recommendation Entities
+# ------------------------------------------------------------------------------
+
+class PerformanceInsight(Base):
+    __tablename__ = "performance_insights"
+
+    id = Column(String(64), primary_key=True, index=True)
+    type = Column(String(64), nullable=False, index=True)          # FORMAT_PERFORMANCE, HOOK_PERFORMANCE, TOPIC_PERFORMANCE, DURATION_PERFORMANCE, POSTING_TIME_PERFORMANCE, OUTLIER_BREAKOUT
+    scope = Column(String(32), default="ACCOUNT", index=True)      # ACCOUNT, PLATFORM, CONTENT_TYPE, TOPIC, CLIP, CAROUSEL
+    platform = Column(String(32), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    evidence_json = Column(Text, default="{}")
+    sample_size = Column(Integer, default=0)
+    confidence = Column(String(32), default="MEDIUM")              # HIGH, MEDIUM, LOW, INSUFFICIENT_DATA
+    source_metric = Column(String(64), default="engagement_rate")
+    baseline_value = Column(Float, nullable=True)
+    observed_value = Column(Float, nullable=True)
+    delta_pct = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    @property
+    def evidence(self):
+        try: return json.loads(self.evidence_json)
+        except: return {}
+
+class ContentPattern(Base):
+    __tablename__ = "content_patterns"
+
+    id = Column(String(64), primary_key=True, index=True)
+    pattern_type = Column(String(64), nullable=False, index=True)  # HOOK, TOPIC, DURATION_BUCKET, POSTING_WINDOW, TEMPLATE, FEATURE
+    feature_name = Column(String(128), nullable=False, index=True)
+    feature_value = Column(String(128), nullable=False, index=True)
+    sample_size = Column(Integer, default=0)
+    median_views = Column(Float, nullable=True)
+    median_engagement_rate = Column(Float, nullable=True)
+    correlation_ratio = Column(Float, nullable=True)               # Observed / Baseline
+    is_positive = Column(Boolean, default=True)
+    evidence_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    @property
+    def evidence(self):
+        try: return json.loads(self.evidence_json)
+        except: return {}
+
+class ContentRecommendation(Base):
+    __tablename__ = "content_recommendations"
+
+    id = Column(String(64), primary_key=True, index=True)
+    type = Column(String(64), nullable=False, index=True)          # BEST_FORMAT, BEST_PLATFORM, BEST_TOPIC, BEST_HOOK, BEST_DURATION, BEST_POSTING_WINDOW, CONTENT_GAP, UNDERPERFORMING_PATTERN, REPLICATION_OPPORTUNITY, EXPERIMENT_SUGGESTION
+    scope = Column(String(32), default="ACCOUNT", index=True)
+    platform = Column(String(32), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    recommendation_text = Column(Text, nullable=False)
+    why_text = Column(Text, nullable=False)
+    action_type = Column(String(64), nullable=True)                # CREATE_CLIP, CREATE_CAROUSEL, SCHEDULE_POST, CREATE_POST
+    action_payload_json = Column(Text, default="{}")
+    evidence_json = Column(Text, default="{}")
+    sample_size = Column(Integer, default=0)
+    confidence = Column(String(32), default="MEDIUM")              # HIGH, MEDIUM, LOW, INSUFFICIENT_DATA
+    status = Column(String(32), default="ACTIVE", index=True)      # ACTIVE, DISMISSED, APPLIED
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    @property
+    def evidence(self):
+        try: return json.loads(self.evidence_json)
+        except: return {}
+
+    @property
+    def action_payload(self):
+        try: return json.loads(self.action_payload_json)
+        except: return {}
+
+class Experiment(Base):
+    __tablename__ = "experiments"
+
+    id = Column(String(64), primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    hypothesis = Column(Text, nullable=False)
+    variable_tested = Column(String(128), nullable=False)
+    control_baseline = Column(Float, nullable=True)
+    success_metric = Column(String(64), default="engagement_rate")
+    target_sample_size = Column(Integer, default=5)
+    current_sample_size = Column(Integer, default=0)
+    status = Column(String(32), default="RUNNING", index=True)     # DRAFT, RUNNING, CONCLUDED, ABANDONED
+    results_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def results(self):
+        try: return json.loads(self.results_json)
+        except: return {}

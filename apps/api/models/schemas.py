@@ -720,3 +720,140 @@ class AnalyticsBackfillRequest(BaseModel):
 class AnalyticsBackfillResponse(BaseModel):
     queued_count: int
     message: str
+
+# ------------------------------------------------------------------------------
+# Phase 11: Real Content Intelligence & Recommendation Schemas
+# ------------------------------------------------------------------------------
+
+class PerformanceInsightResponse(BaseModel):
+    id: str
+    type: str
+    scope: str
+    platform: Optional[str] = None
+    title: str
+    description: str
+    evidence: Dict[str, Any] = {}
+    sample_size: int
+    confidence: str
+    source_metric: str
+    baseline_value: Optional[float] = None
+    observed_value: Optional[float] = None
+    delta_pct: Optional[float] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ContentPatternResponse(BaseModel):
+    id: str
+    pattern_type: str
+    feature_name: str
+    feature_value: str
+    sample_size: int
+    median_views: Optional[float] = None
+    median_engagement_rate: Optional[float] = None
+    correlation_ratio: Optional[float] = None
+    is_positive: bool
+    evidence: Dict[str, Any] = {}
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ContentRecommendationResponse(BaseModel):
+    id: str
+    type: str
+    scope: str
+    platform: Optional[str] = None
+    title: str
+    recommendation_text: str
+    why_text: str
+    action_type: Optional[str] = None
+    action_payload: Dict[str, Any] = {}
+    evidence: Dict[str, Any] = {}
+    sample_size: int
+    confidence: str
+    status: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ExperimentResponse(BaseModel):
+    id: str
+    title: str
+    hypothesis: str
+    variable_tested: str
+    control_baseline: Optional[float] = None
+    success_metric: str
+    target_sample_size: int
+    current_sample_size: int
+    status: str
+    results: Dict[str, Any] = {}
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class TopicPerformanceItem(BaseModel):
+    topic: str
+    sample_size: int
+    median_views: Optional[float] = None
+    median_engagement_rate: Optional[float] = None
+    best_post_title: Optional[str] = None
+    best_post_id: Optional[str] = None
+    performance_vs_baseline_pct: Optional[float] = None
+    confidence: str
+
+class HookPerformanceItem(BaseModel):
+    hook_type: str
+    sample_size: int
+    median_views: Optional[float] = None
+    median_engagement_rate: Optional[float] = None
+    performance_vs_baseline_pct: Optional[float] = None
+    confidence: str
+
+class DurationPerformanceItem(BaseModel):
+    bucket: str
+    sample_size: int
+    median_views: Optional[float] = None
+    median_engagement_rate: Optional[float] = None
+    performance_vs_baseline_pct: Optional[float] = None
+    confidence: str
+
+class PostingWindowItem(BaseModel):
+    day_of_week: str
+    hour_bucket: str
+    sample_size: int
+    median_engagement_rate: Optional[float] = None
+    performance_vs_baseline_pct: Optional[float] = None
+    confidence: str
+
+class ContentGapItem(BaseModel):
+    topic: str
+    existing_posts_count: int
+    missing_format: str
+    opportunity_reason: str
+    topic_median_engagement_rate: Optional[float] = None
+    action_type: str
+    action_payload: Dict[str, Any] = {}
+
+class IntelligenceOverviewResponse(BaseModel):
+    total_analyzed_posts: int
+    account_baseline_engagement_rate: Optional[float] = None
+    account_baseline_views: Optional[float] = None
+    is_sufficient_data: bool
+    minimum_samples_required: int
+    last_analyzed_at: Optional[datetime] = None
+    is_stale: bool = False
+    top_recommendations: List[ContentRecommendationResponse] = []
+    key_insights: List[PerformanceInsightResponse] = []
+    content_gaps: List[ContentGapItem] = []
+
+class IntelligenceRefreshResponse(BaseModel):
+    status: str
+    job_id: str
+    message: str
+
+class AIInsightPayloadSchema(BaseModel):
+    claim: str
+    evidence: Dict[str, Any]
+    confidence: str
+    recommendation: str

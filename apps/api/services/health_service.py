@@ -82,6 +82,12 @@ class HealthService:
             "details": f"Sync Interval: {settings.ANALYTICS_SYNC_INTERVAL_MINUTES}m, Stale Threshold: {settings.ANALYTICS_STALE_AFTER_HOURS}h"
         }
 
+    def check_intelligence(self) -> Dict[str, Any]:
+        return {
+            "status": "healthy",
+            "details": f"Min Sample Threshold: {settings.MIN_RECOMMENDATION_SAMPLES} posts, Stale Threshold: {settings.INTELLIGENCE_STALE_AFTER_HOURS}h"
+        }
+
     async def get_overall_health(self) -> Dict[str, Any]:
         db_res = await self.check_database()
         storage_res = await self.check_storage()
@@ -90,6 +96,7 @@ class HealthService:
         ai_res = self.check_ai_providers()
         scheduler_res = self.check_scheduler()
         analytics_res = self.check_analytics()
+        intelligence_res = self.check_intelligence()
 
         components = {
             "database": db_res,
@@ -98,7 +105,8 @@ class HealthService:
             "redis": redis_res,
             "ai": ai_res,
             "scheduler": scheduler_res,
-            "analytics": analytics_res
+            "analytics": analytics_res,
+            "intelligence": intelligence_res
         }
 
         # Overall status is healthy if critical services (db & storage) are healthy
