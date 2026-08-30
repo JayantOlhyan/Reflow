@@ -21,7 +21,8 @@ from models.entities import (
     Content, Asset, ContentVariant, Transcript, TranscriptSegment,
     ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
     Clip, ClipVariant, PlatformConnection, Publication, Workflow, Job, SystemLog,
-    PerformanceInsight, ContentPattern, ContentRecommendation, Experiment, ExperimentVariant, ExperimentResult
+    PerformanceInsight, ContentPattern, ContentRecommendation, Experiment, ExperimentVariant, ExperimentResult,
+    AutomationRule, AutomationExecution, AutomationActionExecution
 )
 from models.schemas import (
     ContentResponse, ContentListResponse, TextContentCreateRequest,
@@ -47,7 +48,9 @@ from models.schemas import (
     DurationPerformanceItem, PostingWindowItem, ContentGapItem,
     IntelligenceOverviewResponse, IntelligenceRefreshResponse,
     ExperimentVariantSchema, ExperimentResultResponse, ExperimentWarningSchema,
-    ExperimentDetailResponse, ExperimentCreateRequest
+    ExperimentDetailResponse, ExperimentCreateRequest,
+    AutomationRuleCreateRequest, AutomationRuleResponse, AutomationActionExecutionResponse,
+    AutomationExecutionResponse, AutomationDetailResponse
 )
 from services.media_service import media_processor
 from services.queue_service import queue_service
@@ -2487,6 +2490,335 @@ async def export_experiments_route(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=experiments_export.csv"}
     )
+
+# Phase 13: Content Distribution & Automation Engine Endpoints
+@app.post("/api/automations", response_model=AutomationRuleResponse, tags=["Automations"])
+async def create_automation_rule(
+    req: AutomationRuleCreateRequest,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule_id = f"rule_{uuid.uuid4().hex[:8]}"
+    rule = AutomationRule(
+        id=rule_id,
+        name=req.name,
+        description=req.description,
+        enabled=req.enabled,
+        trigger_type=req.trigger_type,
+        scope=req.scope,
+        cooldown_minutes=req.cooldown_minutes or 60,
+        max_runs_per_day=req.max_runs_per_day or 5,
+        status="ACTIVE",
+        created_by=user_id
+    )
+    rule.conditions = req.conditions
+    rule.actions = req.actions
+    db.add(rule)
+    await db.commit()
+    return rule
+
+@app.get("/api/automations", response_model=List[AutomationRuleResponse], tags=["Automations"])
+async def list_automation_rules(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    query = select(AutomationRule)
+    if user_id:
+        query = query.where(or_(AutomationRule.created_by == None, AutomationRule.created_by == user_id))
+    res = await db.execute(query)
+    return res.scalars().all()
+
+@app.get("/api/automations/{rule_id}", response_model=AutomationDetailResponse, tags=["Automations"])
+async def get_automation_rule(
+    rule_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+    
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    # Fetch executions
+    exec_res = await db.execute(
+        select(AutomationExecution)
+        .where(AutomationExecution.automation_id == rule_id)
+        .options(selectinload(AutomationExecution.action_executions))
+        .order_by(AutomationExecution.created_at.desc())
+    )
+    executions = exec_res.scalars().all()
+
+    # Compute metric summaries
+    succeeded = len([e for e in executions if e.status == "SUCCEEDED"])
+    failed = len([e for e in executions if e.status == "FAILED"])
+    skipped = len([e for e in executions if e.status == "SKIPPED"])
+    total = len(executions)
+    
+    metrics = {
+        "total_runs": total,
+        "success_rate": (succeeded / total * 100) if total > 0 else 0,
+        "failed_runs": failed,
+        "skipped_runs": skipped
+    }
+
+    return {
+        "rule": rule,
+        "executions": executions,
+        "metrics": metrics
+    }
+
+@app.put("/api/automations/{rule_id}", response_model=AutomationRuleResponse, tags=["Automations"])
+async def update_automation_rule(
+    rule_id: str,
+    req: AutomationRuleCreateRequest,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    rule.name = req.name
+    rule.description = req.description
+    rule.enabled = req.enabled
+    rule.trigger_type = req.trigger_type
+    rule.scope = req.scope
+    rule.conditions = req.conditions
+    rule.actions = req.actions
+    rule.cooldown_minutes = req.cooldown_minutes or 60
+    rule.max_runs_per_day = req.max_runs_per_day or 5
+    rule.updated_at = datetime.utcnow()
+
+    await db.commit()
+    return rule
+
+@app.delete("/api/automations/{rule_id}", response_model=ApiResponse, tags=["Automations"])
+async def delete_automation_rule(
+    rule_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    await db.delete(rule)
+    await db.commit()
+    return ApiResponse(status="success", message="Automation rule deleted successfully.")
+
+@app.post("/api/automations/{rule_id}/enable", response_model=AutomationRuleResponse, tags=["Automations"])
+async def enable_automation_rule(
+    rule_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    rule.enabled = True
+    rule.status = "ACTIVE"
+    rule.updated_at = datetime.utcnow()
+    await db.commit()
+    return rule
+
+@app.post("/api/automations/{rule_id}/disable", response_model=AutomationRuleResponse, tags=["Automations"])
+async def disable_automation_rule(
+    rule_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    rule.enabled = False
+    rule.status = "DISABLED"
+    rule.updated_at = datetime.utcnow()
+    await db.commit()
+    return rule
+
+@app.post("/api/automations/{rule_id}/run", response_model=AutomationExecutionResponse, tags=["Automations"])
+async def run_automation_rule_manual(
+    rule_id: str,
+    entity_id: str = Query(..., description="The trigger entity ID to evaluate manually"),
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    # Create Execution bypassing safety limit checking
+    exec_id = f"exec_man_{uuid.uuid4().hex[:8]}"
+    execution = AutomationExecution(
+        id=exec_id,
+        automation_id=rule.id,
+        trigger_event=f"manual.{rule.trigger_type.lower()}",
+        trigger_entity_id=entity_id,
+        status="QUEUED",
+        execution_key=f"{rule.id}:{entity_id}:manual",
+        created_at=datetime.utcnow()
+    )
+    db.add(execution)
+
+    for act in rule.actions:
+        act_exec = AutomationActionExecution(
+            id=f"act_{uuid.uuid4().hex[:8]}",
+            execution_id=exec_id,
+            action_type=act.get("type", "UNKNOWN"),
+            status="QUEUED",
+            result_json="{}",
+        )
+        db.add(act_exec)
+
+    await db.commit()
+
+    # Enqueue in background worker
+    job_id = f"job_auto_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        type="AUTOMATION_EXECUTION",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        job_type="AUTOMATION_EXECUTION",
+        execution_id=exec_id
+    )
+
+    # Fetch fresh execution back with selectinload to serialize correctly
+    res_exec = await db.execute(
+        select(AutomationExecution)
+        .where(AutomationExecution.id == exec_id)
+        .options(selectinload(AutomationExecution.action_executions))
+    )
+    return res_exec.scalar_one()
+
+@app.get("/api/automations/{rule_id}/executions", response_model=List[AutomationExecutionResponse], tags=["Automations"])
+async def list_rule_executions(
+    rule_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    res = await db.execute(
+        select(AutomationExecution)
+        .where(AutomationExecution.automation_id == rule_id)
+        .options(selectinload(AutomationExecution.action_executions))
+        .order_by(AutomationExecution.created_at.desc())
+    )
+    return res.scalars().all()
+
+@app.get("/api/automation-executions/{exec_id}", response_model=AutomationExecutionResponse, tags=["Automations"])
+async def get_automation_execution(
+    exec_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(
+        select(AutomationExecution)
+        .where(AutomationExecution.id == exec_id)
+        .options(
+            selectinload(AutomationExecution.action_executions),
+            selectinload(AutomationExecution.rule)
+        )
+    )
+    execution = res.scalar_one_or_none()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Automation execution not found.")
+
+    if user_id and execution.rule.created_by and execution.rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation execution.")
+
+    return execution
+
+@app.post("/api/automations/{rule_id}/dry-run", tags=["Automations"])
+async def dry_run_automation_rule(
+    rule_id: str,
+    entity_id: str = Query(..., description="The trigger entity ID to dry-run"),
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    rule = await db.get(AutomationRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Automation rule not found.")
+
+    if user_id and rule.created_by and rule.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this automation rule.")
+
+    # 1. Resolve event type matching trigger
+    from services.event_bus import event_bus_service
+    event_type = event_bus_service.TRIGGER_EVENT_MAP.get(rule.trigger_type, "content.ready")
+
+    entity_class = event_bus_service.ENTITY_MAPPING.get(event_type)
+    entity = None
+    if entity_class:
+        entity = await db.get(entity_class, entity_id)
+
+    # 2. Evaluate conditions
+    conditions_passed, skip_reason = event_bus_service.evaluate_conditions(entity, rule.conditions)
+    
+    # Previews result
+    actions_to_execute = []
+    if conditions_passed:
+        for act in rule.actions:
+            actions_to_execute.append(act.get("type", "UNKNOWN"))
+
+    preview_message = (
+        f"This automation would execute: {', '.join(actions_to_execute)}. No changes have been executed."
+        if conditions_passed else
+        f"This automation would be skipped because condition checks failed: {skip_reason}."
+    )
+
+    return {
+        "status": "success",
+        "conditions_passed": conditions_passed,
+        "skip_reason": skip_reason,
+        "actions_to_execute": actions_to_execute,
+        "preview_message": preview_message
+    }
+
+@app.post("/api/automation-templates/{template}/create", response_model=AutomationRuleResponse, tags=["Automations"])
+async def create_rule_from_template(
+    template: str,
+    name: str = Query(..., description="The custom name of the automation rule"),
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    from services.automation_service import automation_service
+    try:
+        rule = await automation_service.instantiate_template(db, template, name, user_id)
+        return rule
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

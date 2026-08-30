@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime, timedelta
+from sqlalchemy import select
 
 sys.path.append(os.path.dirname(__file__))
 

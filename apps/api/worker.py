@@ -137,6 +137,10 @@ async def process_single_job(payload: dict) -> bool:
                 content_id=content_id,
                 platforms=["LINKEDIN", "INSTAGRAM", "X", "YOUTUBE"]
             )
+            # Dispatch event
+            from services.event_bus import event_bus_service
+            async with async_session_factory() as session:
+                await event_bus_service.dispatch_event("content.ready", content_id, session)
 
         elif job_type == "CAROUSEL_GENERATION":
             # 5. Plan and render AI carousel deck
@@ -158,6 +162,10 @@ async def process_single_job(payload: dict) -> bool:
         elif job_type == "CAROUSEL_RENDER":
             # 6. Render carousel PNGs and PDF
             await carousel_renderer.render_carousel_deck(carousel_id)
+            # Dispatch event
+            from services.event_bus import event_bus_service
+            async with async_session_factory() as session:
+                await event_bus_service.dispatch_event("carousel.ready", carousel_id, session)
 
         elif job_type == "CLIP_DISCOVERY":
             # 7. Discover candidate clips from transcript & ContentBrief
@@ -191,6 +199,10 @@ async def process_single_job(payload: dict) -> bool:
                 caption_style=cap_style,
                 highlight_keywords=hl_words
             )
+            # Dispatch event
+            from services.event_bus import event_bus_service
+            async with async_session_factory() as session:
+                await event_bus_service.dispatch_event("clip.ready", clip_id, session)
 
         elif job_type == "PLATFORM_PUBLISH":
             # 9. Execute external platform publication
@@ -217,11 +229,24 @@ async def process_single_job(payload: dict) -> bool:
                     job_type="ANALYTICS_SYNC",
                     publication_id=publication_id
                 )
+                # Dispatch event
+                from services.event_bus import event_bus_service
+                async with async_session_factory() as session:
+                    await event_bus_service.dispatch_event("publication.succeeded", publication_id, session)
+            else:
+                # Dispatch failed event
+                from services.event_bus import event_bus_service
+                async with async_session_factory() as session:
+                    await event_bus_service.dispatch_event("publication.failed", publication_id, session)
 
         elif job_type == "ANALYTICS_SYNC":
             # 10. Sync performance metrics from external platform
             publication_id = payload.get("publication_id")
             await analytics_service.sync_publication_metrics(publication_id=publication_id)
+            # Dispatch event
+            from services.event_bus import event_bus_service
+            async with async_session_factory() as session:
+                await event_bus_service.dispatch_event("analytics.updated", publication_id, session)
 
         elif job_type == "INTELLIGENCE_ANALYSIS":
             # 11. Run full content intelligence and pattern analysis pipeline
@@ -233,6 +258,32 @@ async def process_single_job(payload: dict) -> bool:
             from services.experiment_service import experiment_service
             async with async_session_factory() as session:
                 await experiment_service.evaluate_experiment(session, experiment_id)
+            # Dispatch event
+            from services.event_bus import event_bus_service
+            async with async_session_factory() as session:
+                await event_bus_service.dispatch_event("experiment.completed", experiment_id, session)
+
+        elif job_type == "AUTOMATION_EXECUTION":
+            # 13. Run rule distribution and actions pipeline
+            execution_id = payload.get("execution_id")
+            from services.automation_service import automation_service
+            async with async_session_factory() as session:
+                await automation_service.execute_execution_pipeline(session, execution_id)
+
+        elif job_type == "QUALITY_CONTROL":
+            # 14. Run governance quality checks
+            variant_id = payload.get("variant_id")
+            publication_id = payload.get("publication_id")
+            platform = payload.get("platform", "linkedin")
+            from services.quality_control_service import quality_control_service
+            async with async_session_factory() as session:
+                await quality_control_service.run_pipeline(
+                    session=session,
+                    content_id=content_id,
+                    variant_id=variant_id,
+                    publication_id=publication_id,
+                    platform=platform
+                )
 
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:
