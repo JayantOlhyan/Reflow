@@ -135,4 +135,11 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 
 ### 2.11 Database Layer (`apps/api/database.py`)
 - **Engine**: SQLAlchemy Async engine supporting SQLite (development) and PostgreSQL (production).
-- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Clip`, `ClipVariant`, `PlatformConnection`, `Publication`, `PostMetricSnapshot`, `PerformanceInsight`, `ContentPattern`, `ContentRecommendation`, `Experiment`, `Job`, `SystemLog`.
+- **Entities**: `Content`, `Asset`, `ContentVariant`, `Transcript`, `TranscriptSegment`, `ContentBrief`, `GeneratedContent`, `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport`, `Clip`, `ClipVariant`, `PlatformConnection`, `Publication`, `PostMetricSnapshot`, `PerformanceInsight`, `ContentPattern`, `ContentRecommendation`, `Experiment`, `Job`, `SystemLog`, `AutomationRule`, `AutomationExecution`, `AutomationActionExecution`.
+
+### 2.12 Content Distribution & Automation Engine (`apps/api/services/event_bus.py` & `automation_service.py`)
+- **Asynchronous Event Bus**: Persistent event routing maps system lifecycle checkpoints (e.g. `content.ready`, `clip.ready`) into background tasks.
+- **Safety Gates & Rate Limits**: Hard limits of 5 posts/day/platform, a minimum 60-minute posting interval, and a 24-hour window same-content duplicate protection.
+- **Conjunction / Condition Evaluations**: Compares properties dynamically (e.g., matching aspect ratio layout or durations) before dispatching actions.
+- **Failure Isolation & History Tracing**: Allows re-execution of individual failed actions inside a pipeline without rollback of sibling actions.
+- **Human-in-the-Loop Gates**: Supports `AUTO_APPROVE` or `REQUIRE_APPROVAL` scopes, blocking automated publications until manually approved.
