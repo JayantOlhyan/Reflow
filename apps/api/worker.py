@@ -18,6 +18,7 @@ from services.ai_service import ai_service
 from services.carousel_renderer import carousel_renderer
 from services.publishing_service import publishing_service
 from services.analytics_service import analytics_service
+from services.intelligence_service import intelligence_service
 from utils.logging import get_logger
 
 logger = get_logger("MediaWorker")
@@ -221,6 +222,10 @@ async def process_single_job(payload: dict) -> bool:
             # 10. Sync performance metrics from external platform
             publication_id = payload.get("publication_id")
             await analytics_service.sync_publication_metrics(publication_id=publication_id)
+
+        elif job_type == "INTELLIGENCE_ANALYSIS":
+            # 11. Run full content intelligence and pattern analysis pipeline
+            await intelligence_service.run_full_analysis()
 
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:

@@ -20,7 +20,8 @@ from database import get_db, init_db
 from models.entities import (
     Content, Asset, ContentVariant, Transcript, TranscriptSegment,
     ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
-    Clip, ClipVariant, PlatformConnection, Publication, Workflow, Job, SystemLog
+    Clip, ClipVariant, PlatformConnection, Publication, Workflow, Job, SystemLog,
+    PerformanceInsight, ContentPattern, ContentRecommendation, Experiment
 )
 from models.schemas import (
     ContentResponse, ContentListResponse, TextContentCreateRequest,
@@ -40,7 +41,11 @@ from models.schemas import (
     RescheduleRequest, CalendarEventItem, CalendarResponse,
     PostMetricSnapshotResponse, PublicationAnalyticsResponse, AnalyticsOverviewResponse,
     AnalyticsTimeseriesItem, AnalyticsTimeseriesResponse, PlatformAnalyticsItem,
-    ContentAnalyticsItem, AnalyticsBackfillRequest, AnalyticsBackfillResponse
+    ContentAnalyticsItem, AnalyticsBackfillRequest, AnalyticsBackfillResponse,
+    PerformanceInsightResponse, ContentPatternResponse, ContentRecommendationResponse,
+    ExperimentResponse, TopicPerformanceItem, HookPerformanceItem,
+    DurationPerformanceItem, PostingWindowItem, ContentGapItem,
+    IntelligenceOverviewResponse, IntelligenceRefreshResponse
 )
 from services.media_service import media_processor
 from services.queue_service import queue_service
@@ -52,6 +57,7 @@ from services.caption_service import caption_service
 from services.publishing_service import publishing_service
 from services.scheduler_service import scheduler_service
 from services.analytics_service import analytics_service
+from services.intelligence_service import intelligence_service
 from connectors.youtube import youtube_oauth, youtube_connector
 from services.encryption_service import encryption_service
 from services.health_service import health_service
@@ -2100,6 +2106,117 @@ async def export_analytics_csv_endpoint(
         content=csv_content,
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=reflow_analytics_{now_utc.strftime('%Y%m%d')}.csv"}
+    )
+
+# ------------------------------------------------------------------------------
+# Phase 11: Real Content Intelligence & Recommendation Endpoints
+# ------------------------------------------------------------------------------
+
+@app.get("/api/intelligence/overview", response_model=IntelligenceOverviewResponse, tags=["Intelligence"])
+async def get_intelligence_overview(db: AsyncSession = Depends(get_db)):
+    """Returns account-wide content intelligence KPIs, baselines, top recommendations and content gaps."""
+    overview = await intelligence_service.get_overview(db=db)
+    return overview
+
+@app.get("/api/intelligence/insights", response_model=List[PerformanceInsightResponse], tags=["Intelligence"])
+async def list_intelligence_insights(
+    scope: Optional[str] = Query(None, description="Scope filter: ACCOUNT, PLATFORM, CONTENT_TYPE, TOPIC, CLIP, CAROUSEL"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns persisted performance insights."""
+    query = select(PerformanceInsight).order_by(PerformanceInsight.created_at.desc())
+    if scope:
+        query = query.where(PerformanceInsight.scope == scope.upper())
+    res = await db.execute(query)
+    insights = res.scalars().all()
+    return insights
+
+@app.get("/api/intelligence/recommendations", response_model=List[ContentRecommendationResponse], tags=["Intelligence"])
+async def list_content_recommendations(
+    status: str = Query("ACTIVE", description="Recommendation status filter: ACTIVE, DISMISSED, APPLIED"),
+    type: Optional[str] = Query(None, description="Recommendation type filter"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns active evidence-backed content recommendations."""
+    query = select(ContentRecommendation).where(ContentRecommendation.status == status.upper()).order_by(ContentRecommendation.created_at.desc())
+    if type:
+        query = query.where(ContentRecommendation.type == type.upper())
+    res = await db.execute(query)
+    recs = res.scalars().all()
+    return recs
+
+@app.get("/api/intelligence/patterns", response_model=List[ContentPatternResponse], tags=["Intelligence"])
+async def list_content_patterns(
+    pattern_type: Optional[str] = Query(None, description="Pattern type filter: HOOK, TOPIC, DURATION_BUCKET, POSTING_WINDOW, TEMPLATE"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns identified recurring content patterns."""
+    query = select(ContentPattern).order_by(ContentPattern.sample_size.desc())
+    if pattern_type:
+        query = query.where(ContentPattern.pattern_type == pattern_type.upper())
+    res = await db.execute(query)
+    patterns = res.scalars().all()
+    return patterns
+
+@app.get("/api/intelligence/topics", response_model=List[TopicPerformanceItem], tags=["Intelligence"])
+async def get_topic_performance(db: AsyncSession = Depends(get_db)):
+    """Returns performance metrics grouped by normalized topic cluster."""
+    topics = await intelligence_service.get_topic_performance(db=db)
+    return topics
+
+@app.get("/api/intelligence/hooks", response_model=List[HookPerformanceItem], tags=["Intelligence"])
+async def get_hook_performance(db: AsyncSession = Depends(get_db)):
+    """Returns performance breakdown by hook archetype."""
+    hooks = await intelligence_service.get_hook_performance(db=db)
+    return hooks
+
+@app.get("/api/intelligence/durations", response_model=List[DurationPerformanceItem], tags=["Intelligence"])
+async def get_duration_performance(db: AsyncSession = Depends(get_db)):
+    """Returns performance breakdown by video/clip duration bucket."""
+    durations = await intelligence_service.get_duration_performance(db=db)
+    return durations
+
+@app.get("/api/intelligence/posting-windows", response_model=List[PostingWindowItem], tags=["Intelligence"])
+async def get_posting_windows(db: AsyncSession = Depends(get_db)):
+    """Returns performance breakdown by localized day and hour posting windows."""
+    windows = await intelligence_service.get_posting_windows(db=db)
+    return windows
+
+@app.get("/api/intelligence/content-gaps", response_model=List[ContentGapItem], tags=["Intelligence"])
+async def get_content_gaps(db: AsyncSession = Depends(get_db)):
+    """Returns high-performing topics lacking specific format representations."""
+    overview = await intelligence_service.get_overview(db=db)
+    return overview.get("content_gaps", [])
+
+@app.get("/api/intelligence/experiments", response_model=List[ExperimentResponse], tags=["Intelligence"])
+async def list_experiments(db: AsyncSession = Depends(get_db)):
+    """Returns tracked content experiments."""
+    experiments = await intelligence_service.get_experiments(db=db)
+    return experiments
+
+@app.post("/api/intelligence/refresh", response_model=IntelligenceRefreshResponse, tags=["Intelligence"])
+async def refresh_intelligence_analysis(db: AsyncSession = Depends(get_db)):
+    """Dispatches an asynchronous background job to recompute content patterns and recommendations."""
+    job_id = f"job_intel_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        type="INTELLIGENCE_ANALYSIS",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        job_type="INTELLIGENCE_ANALYSIS"
+    )
+
+    logger.info(f"Enqueued INTELLIGENCE_ANALYSIS job {job_id}.")
+    return IntelligenceRefreshResponse(
+        status="queued",
+        job_id=job_id,
+        message="Intelligence analysis job queued successfully."
     )
 
 # ------------------------------------------------------------------------------

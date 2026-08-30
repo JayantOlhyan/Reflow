@@ -18,6 +18,7 @@ async def run_scheduler():
     await init_db()
 
     last_analytics_sweep = datetime.utcnow() - timedelta(minutes=settings.ANALYTICS_SYNC_INTERVAL_MINUTES)
+    last_intelligence_sweep = datetime.utcnow() - timedelta(hours=settings.INTELLIGENCE_STALE_AFTER_HOURS)
 
     while True:
         try:
@@ -41,6 +42,13 @@ async def run_scheduler():
                 logger.info("Executing scheduled analytics sync sweep for published posts...")
                 await analytics_service.backfill_analytics(limit=50)
                 last_analytics_sweep = now_utc
+
+            # 5. Periodic intelligence pattern analysis sweep
+            if (now_utc - last_intelligence_sweep).total_seconds() >= (settings.INTELLIGENCE_STALE_AFTER_HOURS * 3600):
+                from services.intelligence_service import intelligence_service
+                logger.info("Executing scheduled content intelligence analysis sweep...")
+                await intelligence_service.run_full_analysis()
+                last_intelligence_sweep = now_utc
 
             await asyncio.sleep(settings.SCHEDULER_POLL_INTERVAL_SECONDS)
 
