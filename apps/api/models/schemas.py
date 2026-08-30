@@ -945,3 +945,209 @@ class ExperimentCreateRequest(BaseModel):
     treatment_content_id: str
     treatment_variant_id: Optional[str] = None
     treatment_publication_id: Optional[str] = None
+
+# Phase 13: Content Distribution & Automation Engine Schemas
+class AutomationRuleCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    enabled: bool = True
+    trigger_type: str
+    scope: Optional[str] = None
+    conditions: List[Dict[str, Any]] = []
+    actions: List[Dict[str, Any]] = []
+    cooldown_minutes: Optional[int] = 60
+    max_runs_per_day: Optional[int] = 5
+
+class AutomationRuleResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    enabled: bool
+    trigger_type: str
+    scope: Optional[str] = None
+    conditions: List[Dict[str, Any]] = []
+    actions: List[Dict[str, Any]] = []
+    cooldown_minutes: int
+    max_runs_per_day: int
+    created_at: datetime
+    updated_at: datetime
+    last_run_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
+    status: str
+    created_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class AutomationActionExecutionResponse(BaseModel):
+    id: str
+    execution_id: str
+    action_type: str
+    status: str
+    job_id: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    result: Dict[str, Any] = {}
+    error: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class AutomationExecutionResponse(BaseModel):
+    id: str
+    automation_id: str
+    trigger_event: str
+    trigger_entity_id: str
+    status: str
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+    execution_key: str
+    created_at: datetime
+    action_executions: List[AutomationActionExecutionResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+class AutomationDetailResponse(BaseModel):
+    rule: AutomationRuleResponse
+    executions: List[AutomationExecutionResponse] = []
+    metrics: Dict[str, Any] = {}
+
+
+# ------------------------------------------------------------------------------
+# Phase 14 Governance & Quality Control Schemas
+# ------------------------------------------------------------------------------
+
+class GovernanceRuleSchema(BaseModel):
+    name: str
+    type: str  # e.g., "codec", "aspect_ratio", "forbidden_term", "max_length"
+    params: Dict[str, Any] = {}
+
+class GovernancePolicyCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    scope: str = "GLOBAL"  # GLOBAL, PLATFORM, CONTENT_TYPE, AUTOMATION, WORKFLOW
+    severity: str = "BLOCKING"  # INFO, WARNING, BLOCKING
+    rules: List[GovernanceRuleSchema] = []
+    enabled: Optional[bool] = True
+
+class GovernancePolicyUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    scope: Optional[str] = None
+    severity: Optional[str] = None
+    rules: Optional[List[GovernanceRuleSchema]] = None
+    enabled: Optional[bool] = None
+
+class GovernancePolicyResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    enabled: bool
+    scope: str
+    severity: str
+    rules: List[Dict[str, Any]] = []
+    policy_version: int
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class BrandProfileCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    tone: Optional[str] = "professional"
+    language: Optional[str] = "en"
+    allowed_topics: Optional[List[str]] = []
+    restricted_topics: Optional[List[str]] = []
+    preferred_ctas: Optional[List[str]] = []
+    forbidden_terms: Optional[List[str]] = []
+    required_terms: Optional[List[str]] = []
+    hashtag_rules: Optional[Dict[str, Any]] = {}
+    mention_rules: Optional[Dict[str, Any]] = {}
+    link_rules: Optional[Dict[str, Any]] = {}
+
+class BrandProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    tone: Optional[str] = None
+    language: Optional[str] = None
+    allowed_topics: Optional[List[str]] = None
+    restricted_topics: Optional[List[str]] = None
+    preferred_ctas: Optional[List[str]] = None
+    forbidden_terms: Optional[List[str]] = None
+    required_terms: Optional[List[str]] = None
+    hashtag_rules: Optional[Dict[str, Any]] = None
+    mention_rules: Optional[Dict[str, Any]] = None
+    link_rules: Optional[Dict[str, Any]] = None
+
+class BrandProfileResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    tone: str
+    language: str
+    allowed_topics: List[str] = []
+    restricted_topics: List[str] = []
+    preferred_ctas: List[str] = []
+    forbidden_terms: List[str] = []
+    required_terms: List[str] = []
+    hashtag_rules: Dict[str, Any] = {}
+    mention_rules: Dict[str, Any] = {}
+    link_rules: Dict[str, Any] = {}
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class GovernanceOverrideResponse(BaseModel):
+    id: str
+    quality_check_id: str
+    user_id: Optional[str] = None
+    reason: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class QualityCheckResponse(BaseModel):
+    id: str
+    content_id: Optional[str] = None
+    variant_id: Optional[str] = None
+    publication_id: Optional[str] = None
+    check_type: str
+    status: str
+    severity: str
+    score: Optional[float] = None
+    message: Optional[str] = None
+    details: Dict[str, Any] = {}
+    policy_version: int
+    created_at: datetime
+    override: Optional[GovernanceOverrideResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ContentClaimResponse(BaseModel):
+    id: str
+    content_id: str
+    text: str
+    source_reference: Optional[str] = None
+    verification_status: str
+    severity: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class GovernanceOverrideRequest(BaseModel):
+    reason: str = Field(..., min_length=4)
+
+class GovernanceResultResponse(BaseModel):
+    content_id: str
+    status: str
+    blocking_count: int
+    warning_count: int
+    info_count: int
+    evaluated_at: datetime
+    policy_version: int
+
+    model_config = ConfigDict(from_attributes=True)
+

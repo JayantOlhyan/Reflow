@@ -45,6 +45,10 @@ from sqlalchemy import text
 
 async def init_db():
     """Initializes database schema tables and runs safe column migrations."""
+    from models.entities import (
+        AutomationRule, AutomationExecution, AutomationActionExecution,
+        GovernancePolicy, BrandProfile, QualityCheck, ContentClaim, GovernanceOverride, GovernanceResult
+    )
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -108,6 +112,9 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_variants_experiment ON experiment_variants (experiment_id)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_results_experiment ON experiment_results (experiment_id)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_experiments_recommendation ON experiments (recommendation_id)"))
+                # Governance composite indexes
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_checks_content_status ON quality_checks (content_id, status)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_gov_results_content ON governance_results (content_id)"))
             except Exception:
                 pass
 

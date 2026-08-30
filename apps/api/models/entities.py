@@ -646,3 +646,243 @@ class ExperimentResult(Base):
 
     experiment = relationship("Experiment", back_populates="evaluation_results")
     variant = relationship("ExperimentVariant", lazy="selectin")
+
+class AutomationRule(Base):
+    __tablename__ = "automation_rules"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    enabled = Column(Boolean, default=True, index=True)
+    trigger_type = Column(String(64), nullable=False, index=True)
+    scope = Column(String(64), nullable=True)
+    conditions_json = Column("conditions", Text, default="[]")
+    actions_json = Column("actions", Text, default="[]")
+    cooldown_minutes = Column(Integer, default=60)
+    max_runs_per_day = Column(Integer, default=5)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_run_at = Column(DateTime, nullable=True)
+    next_run_at = Column(DateTime, nullable=True, index=True)
+    status = Column(String(32), default="ACTIVE", index=True)     # ACTIVE, PAUSED, ERROR, DISABLED
+    created_by = Column(String(64), nullable=True)
+
+    @property
+    def conditions(self) -> List[Dict[str, Any]]:
+        try: return json.loads(self.conditions_json or "[]")
+        except: return []
+
+    @conditions.setter
+    def conditions(self, value):
+        self.conditions_json = json.dumps(value or [])
+
+    @property
+    def actions(self) -> List[Dict[str, Any]]:
+        try: return json.loads(self.actions_json or "[]")
+        except: return []
+
+    @actions.setter
+    def actions(self, value):
+        self.actions_json = json.dumps(value or [])
+
+    executions = relationship("AutomationExecution", back_populates="rule", cascade="all, delete-orphan", lazy="selectin")
+
+class AutomationExecution(Base):
+    __tablename__ = "automation_executions"
+
+    id = Column(String(64), primary_key=True, index=True)
+    automation_id = Column(String(64), ForeignKey("automation_rules.id", ondelete="CASCADE"), nullable=False, index=True)
+    trigger_event = Column(String(64), nullable=False)
+    trigger_entity_id = Column(String(64), nullable=False)
+    status = Column(String(32), default="QUEUED", index=True)     # QUEUED, RUNNING, SUCCEEDED, FAILED, SKIPPED
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    error = Column(Text, nullable=True)
+    execution_key = Column(String(255), nullable=False, index=True)  # rule_id:entity_id
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    rule = relationship("AutomationRule", back_populates="executions")
+    action_executions = relationship("AutomationActionExecution", back_populates="execution", cascade="all, delete-orphan", lazy="selectin")
+
+class AutomationActionExecution(Base):
+    __tablename__ = "automation_action_executions"
+
+    id = Column(String(64), primary_key=True, index=True)
+    execution_id = Column(String(64), ForeignKey("automation_executions.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_type = Column(String(64), nullable=False)
+    status = Column(String(32), default="QUEUED", index=True)     # QUEUED, RUNNING, SUCCEEDED, FAILED, SKIPPED, BLOCKED, WAITING_APPROVAL
+    job_id = Column(String(64), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    result_json = Column("result", Text, default="{}")
+    error = Column(Text, nullable=True)
+
+    @property
+    def result(self) -> Dict[str, Any]:
+        try: return json.loads(self.result_json or "{}")
+        except: return {}
+
+    @result.setter
+    def result(self, value):
+        self.result_json = json.dumps(value or {})
+
+    execution = relationship("AutomationExecution", back_populates="action_executions")
+
+class GovernancePolicy(Base):
+    __tablename__ = "governance_policies"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    enabled = Column(Boolean, default=True, index=True)
+    scope = Column(String(64), nullable=False, index=True)       # GLOBAL, PLATFORM, CONTENT_TYPE, AUTOMATION, WORKFLOW
+    severity = Column(String(32), default="BLOCKING", index=True)  # INFO, WARNING, BLOCKING
+    rules_json = Column("rules", Text, default="[]")
+    policy_version = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String(64), nullable=True)
+
+    @property
+    def rules(self) -> List[Dict[str, Any]]:
+        try: return json.loads(self.rules_json or "[]")
+        except: return []
+
+    @rules.setter
+    def rules(self, value):
+        self.rules_json = json.dumps(value or [])
+
+class BrandProfile(Base):
+    __tablename__ = "brand_profiles"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    tone = Column(String(128), default="professional")
+    language = Column(String(32), default="en")
+    allowed_topics_json = Column("allowed_topics", Text, default="[]")
+    restricted_topics_json = Column("restricted_topics", Text, default="[]")
+    preferred_ctas_json = Column("preferred_ctas", Text, default="[]")
+    forbidden_terms_json = Column("forbidden_terms", Text, default="[]")
+    required_terms_json = Column("required_terms", Text, default="[]")
+    hashtag_rules_json = Column("hashtag_rules", Text, default="{}")
+    mention_rules_json = Column("mention_rules", Text, default="{}")
+    link_rules_json = Column("link_rules", Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String(64), nullable=True)
+
+    @property
+    def allowed_topics(self) -> List[str]:
+        try: return json.loads(self.allowed_topics_json or "[]")
+        except: return []
+    @allowed_topics.setter
+    def allowed_topics(self, value): self.allowed_topics_json = json.dumps(value or [])
+
+    @property
+    def restricted_topics(self) -> List[str]:
+        try: return json.loads(self.restricted_topics_json or "[]")
+        except: return []
+    @restricted_topics.setter
+    def restricted_topics(self, value): self.restricted_topics_json = json.dumps(value or [])
+
+    @property
+    def preferred_ctas(self) -> List[str]:
+        try: return json.loads(self.preferred_ctas_json or "[]")
+        except: return []
+    @preferred_ctas.setter
+    def preferred_ctas(self, value): self.preferred_ctas_json = json.dumps(value or [])
+
+    @property
+    def forbidden_terms(self) -> List[str]:
+        try: return json.loads(self.forbidden_terms_json or "[]")
+        except: return []
+    @forbidden_terms.setter
+    def forbidden_terms(self, value): self.forbidden_terms_json = json.dumps(value or [])
+
+    @property
+    def required_terms(self) -> List[str]:
+        try: return json.loads(self.required_terms_json or "[]")
+        except: return []
+    @required_terms.setter
+    def required_terms(self, value): self.required_terms_json = json.dumps(value or [])
+
+    @property
+    def hashtag_rules(self) -> Dict[str, Any]:
+        try: return json.loads(self.hashtag_rules_json or "{}")
+        except: return {}
+    @hashtag_rules.setter
+    def hashtag_rules(self, value): self.hashtag_rules_json = json.dumps(value or {})
+
+    @property
+    def mention_rules(self) -> Dict[str, Any]:
+        try: return json.loads(self.mention_rules_json or "{}")
+        except: return {}
+    @mention_rules.setter
+    def mention_rules(self, value): self.mention_rules_json = json.dumps(value or {})
+
+    @property
+    def link_rules(self) -> Dict[str, Any]:
+        try: return json.loads(self.link_rules_json or "{}")
+        except: return {}
+    @link_rules.setter
+    def link_rules(self, value): self.link_rules_json = json.dumps(value or {})
+
+class QualityCheck(Base):
+    __tablename__ = "quality_checks"
+
+    id = Column(String(64), primary_key=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=True, index=True)
+    variant_id = Column(String(64), nullable=True, index=True)
+    publication_id = Column(String(64), ForeignKey("publications.id", ondelete="CASCADE"), nullable=True, index=True)
+    check_type = Column(String(64), nullable=False, index=True)  # MEDIA_VALIDITY, BRAND_COMPLIANCE, etc.
+    status = Column(String(32), default="PENDING", index=True)     # PENDING, RUNNING, PASSED, WARNING, FAILED, SKIPPED
+    severity = Column(String(32), default="BLOCKING", index=True)  # INFO, WARNING, BLOCKING
+    score = Column(Float, nullable=True)
+    message = Column(Text, nullable=True)
+    details_json = Column("details", Text, default="{}")
+    policy_version = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    @property
+    def details(self) -> Dict[str, Any]:
+        try: return json.loads(self.details_json or "{}")
+        except: return {}
+    @details.setter
+    def details(self, value): self.details_json = json.dumps(value or {})
+
+    override = relationship("GovernanceOverride", back_populates="quality_check", cascade="all, delete-orphan", uselist=False)
+
+class ContentClaim(Base):
+    __tablename__ = "content_claims"
+
+    id = Column(String(64), primary_key=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    source_reference = Column(Text, nullable=True)
+    verification_status = Column(String(32), default="UNVERIFIED", index=True) # UNVERIFIED, SUPPORTED, CONTRADICTED, NOT_APPLICABLE
+    severity = Column(String(32), default="WARNING")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class GovernanceOverride(Base):
+    __tablename__ = "governance_overrides"
+
+    id = Column(String(64), primary_key=True, index=True)
+    quality_check_id = Column(String(64), ForeignKey("quality_checks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(64), nullable=True)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    quality_check = relationship("QualityCheck", back_populates="override")
+
+class GovernanceResult(Base):
+    __tablename__ = "governance_results"
+
+    id = Column(String(64), primary_key=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(32), default="PASS", index=True) # PASS, PASS_WITH_WARNINGS, BLOCKED
+    blocking_count = Column(Integer, default=0)
+    warning_count = Column(Integer, default=0)
+    info_count = Column(Integer, default=0)
+    evaluated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    policy_version = Column(Integer, default=1)

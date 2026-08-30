@@ -139,6 +139,68 @@ class HealthService:
         except Exception as e:
             return {"status": "degraded", "details": f"Error: {e}"}
 
+    async def check_automation_engine(self) -> Dict[str, Any]:
+        try:
+            from database import async_session_factory
+            from models.entities import AutomationRule, AutomationExecution
+            from sqlalchemy import select, func, or_
+            async with async_session_factory() as session:
+                active_rules_res = await session.execute(
+                    select(func.count(AutomationRule.id)).where(AutomationRule.status == "ACTIVE")
+                )
+                active_rules = active_rules_res.scalar() or 0
+
+                active_execs_res = await session.execute(
+                    select(func.count(AutomationExecution.id)).where(
+                        AutomationExecution.status.in_(["QUEUED", "RUNNING"])
+                    )
+                )
+                active_execs = active_execs_res.scalar() or 0
+
+                succeeded_res = await session.execute(
+                    select(func.count(AutomationExecution.id)).where(AutomationExecution.status == "SUCCEEDED")
+                )
+                succeeded = succeeded_res.scalar() or 0
+
+                failed_res = await session.execute(
+                    select(func.count(AutomationExecution.id)).where(AutomationExecution.status == "FAILED")
+                )
+                failed = failed_res.scalar() or 0
+
+                last_exec_res = await session.execute(
+                    select(AutomationExecution.created_at)
+                    .order_by(AutomationExecution.created_at.desc())
+                    .limit(1)
+                )
+                last_exec = last_exec_res.scalar()
+
+                last_fail_res = await session.execute(
+                    select(AutomationExecution.completed_at)
+                    .where(AutomationExecution.status == "FAILED")
+                    .order_by(AutomationExecution.completed_at.desc())
+                    .limit(1)
+                )
+                last_fail = last_fail_res.scalar()
+
+            status = "healthy"
+            if active_execs > 20:
+                status = "degraded"
+
+            return {
+                "status": status,
+                "details": f"Active Rules: {active_rules}, Running: {active_execs}",
+                "metrics": {
+                    "active_rules": active_rules,
+                    "running_executions": active_execs,
+                    "successful_executions": succeeded,
+                    "failed_executions": failed,
+                    "last_execution": last_exec.isoformat() if last_exec else None,
+                    "last_failure": last_fail.isoformat() if last_fail else None
+                }
+            }
+        except Exception as e:
+            return {"status": "degraded", "details": f"Error: {e}"}
+
     async def get_overall_health(self) -> Dict[str, Any]:
         db_res = await self.check_database()
         storage_res = await self.check_storage()
@@ -149,6 +211,7 @@ class HealthService:
         analytics_res = self.check_analytics()
         intelligence_res = self.check_intelligence()
         experiments_res = await self.check_experiment_engine()
+        automations_res = await self.check_automation_engine()
 
         components = {
             "database": db_res,
@@ -159,7 +222,8 @@ class HealthService:
             "scheduler": scheduler_res,
             "analytics": analytics_res,
             "intelligence": intelligence_res,
-            "experiments": experiments_res
+            "experiments": experiments_res,
+            "automations": automations_res
         }
 
         # Overall status is healthy if critical services (db & storage) are healthy
