@@ -88,6 +88,57 @@ class HealthService:
             "details": f"Min Sample Threshold: {settings.MIN_RECOMMENDATION_SAMPLES} posts, Stale Threshold: {settings.INTELLIGENCE_STALE_AFTER_HOURS}h"
         }
 
+    async def check_experiment_engine(self) -> Dict[str, Any]:
+        try:
+            from database import async_session_factory
+            from models.entities import Experiment, Job
+            from sqlalchemy import select, func, and_
+            async with async_session_factory() as session:
+                active_res = await session.execute(
+                    select(func.count(Experiment.id)).where(Experiment.status == "RUNNING")
+                )
+                active_count = active_res.scalar() or 0
+
+                queued_res = await session.execute(
+                    select(func.count(Job.id)).where(
+                        and_(Job.type == "EXPERIMENT_EVALUATION", Job.status == "QUEUED")
+                    )
+                )
+                queued_count = queued_res.scalar() or 0
+
+                last_success_res = await session.execute(
+                    select(Job.completed_at)
+                    .where(and_(Job.type == "EXPERIMENT_EVALUATION", Job.status == "SUCCEEDED"))
+                    .order_by(Job.completed_at.desc())
+                    .limit(1)
+                )
+                last_success = last_success_res.scalar()
+
+                last_fail_res = await session.execute(
+                    select(Job.completed_at)
+                    .where(and_(Job.type == "EXPERIMENT_EVALUATION", Job.status == "FAILED"))
+                    .order_by(Job.completed_at.desc())
+                    .limit(1)
+                )
+                last_fail = last_fail_res.scalar()
+
+            status = "healthy"
+            if queued_count > 10:
+                status = "degraded"
+
+            return {
+                "status": status,
+                "details": f"Active: {active_count}, Queued: {queued_count}",
+                "metrics": {
+                    "active_experiments": active_count,
+                    "queued_evaluations": queued_count,
+                    "last_successful_evaluation": last_success.isoformat() if last_success else None,
+                    "last_failed_evaluation": last_fail.isoformat() if last_fail else None
+                }
+            }
+        except Exception as e:
+            return {"status": "degraded", "details": f"Error: {e}"}
+
     async def get_overall_health(self) -> Dict[str, Any]:
         db_res = await self.check_database()
         storage_res = await self.check_storage()
@@ -97,6 +148,7 @@ class HealthService:
         scheduler_res = self.check_scheduler()
         analytics_res = self.check_analytics()
         intelligence_res = self.check_intelligence()
+        experiments_res = await self.check_experiment_engine()
 
         components = {
             "database": db_res,
@@ -106,7 +158,8 @@ class HealthService:
             "ai": ai_res,
             "scheduler": scheduler_res,
             "analytics": analytics_res,
-            "intelligence": intelligence_res
+            "intelligence": intelligence_res,
+            "experiments": experiments_res
         }
 
         # Overall status is healthy if critical services (db & storage) are healthy

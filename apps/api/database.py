@@ -76,6 +76,20 @@ async def init_db():
                 ("publications", "last_analytics_sync_at", "DATETIME"),
                 ("publications", "analytics_error_code", "VARCHAR(64)"),
                 ("publications", "analytics_error_message", "TEXT"),
+                ("experiments", "name", "VARCHAR(255)"),
+                ("experiments", "description", "TEXT"),
+                ("experiments", "scope", "VARCHAR(64)"),
+                ("experiments", "platform", "VARCHAR(32)"),
+                ("experiments", "started_at", "DATETIME"),
+                ("experiments", "ended_at", "DATETIME"),
+                ("experiments", "minimum_sample_size", "INTEGER DEFAULT 5"),
+                ("experiments", "primary_metric", "VARCHAR(64) DEFAULT 'engagement_rate'"),
+                ("experiments", "secondary_metrics", "TEXT DEFAULT '[]'"),
+                ("experiments", "confidence_level", "FLOAT DEFAULT 0.95"),
+                ("experiments", "winner_variant_id", "VARCHAR(64)"),
+                ("experiments", "conclusion", "TEXT"),
+                ("experiments", "created_by", "VARCHAR(64)"),
+                ("experiments", "recommendation_id", "VARCHAR(64)"),
             ]
             for tbl, col, col_def in migrations:
                 try:
@@ -91,6 +105,9 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_patterns_type_feature ON content_patterns (pattern_type, feature_name)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recs_type_status ON content_recommendations (type, status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_exp_status ON experiments (status)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_variants_experiment ON experiment_variants (experiment_id)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_results_experiment ON experiment_results (experiment_id)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_experiments_recommendation ON experiments (recommendation_id)"))
             except Exception:
                 pass
 

@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import List, Optional, Dict, Any
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from database import Base
@@ -562,19 +563,86 @@ class Experiment(Base):
     __tablename__ = "experiments"
 
     id = Column(String(64), primary_key=True, index=True)
-    title = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
     hypothesis = Column(Text, nullable=False)
-    variable_tested = Column(String(128), nullable=False)
+    status = Column(String(32), default="DRAFT", index=True)     # DRAFT, READY, RUNNING, PAUSED, COMPLETED, CANCELLED, INSUFFICIENT_DATA
+    scope = Column(String(64), nullable=True)                    # HOOK, CAPTION, THUMBNAIL, TITLE, DURATION, FORMAT, CAROUSEL_TEMPLATE, CTA, POSTING_WINDOW
+    platform = Column(String(32), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    minimum_sample_size = Column(Integer, default=5)
+    primary_metric = Column(String(64), default="engagement_rate")
+    secondary_metrics_json = Column("secondary_metrics", Text, default="[]")              # JSON list of metrics
+    confidence_level = Column(Float, default=0.95)
+    winner_variant_id = Column(String(64), nullable=True)
+    conclusion = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    recommendation_id = Column(String(64), ForeignKey("content_recommendations.id", ondelete="SET NULL"), nullable=True)
+
+    @property
+    def secondary_metrics(self) -> List[str]:
+        try: return json.loads(self.secondary_metrics_json or "[]")
+        except: return []
+
+    @secondary_metrics.setter
+    def secondary_metrics(self, value):
+        self.secondary_metrics_json = json.dumps(value or [])
+
+    # Backwards compatibility fields for Phase 11
+    title = Column(String(255), nullable=True)
+    variable_tested = Column(String(128), nullable=True)
     control_baseline = Column(Float, nullable=True)
     success_metric = Column(String(64), default="engagement_rate")
     target_sample_size = Column(Integer, default=5)
     current_sample_size = Column(Integer, default=0)
-    status = Column(String(32), default="RUNNING", index=True)     # DRAFT, RUNNING, CONCLUDED, ABANDONED
     results_json = Column(Text, default="{}")
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     @property
     def results(self):
         try: return json.loads(self.results_json)
         except: return {}
+
+    variants = relationship("ExperimentVariant", back_populates="experiment", cascade="all, delete-orphan", lazy="selectin")
+    evaluation_results = relationship("ExperimentResult", back_populates="experiment", cascade="all, delete-orphan", lazy="selectin")
+
+class ExperimentVariant(Base):
+    __tablename__ = "experiment_variants"
+
+    id = Column(String(64), primary_key=True, index=True)
+    experiment_id = Column(String(64), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="SET NULL"), nullable=True, index=True)
+    content_variant_id = Column(String(64), nullable=True)
+    publication_id = Column(String(64), ForeignKey("publications.id", ondelete="SET NULL"), nullable=True, index=True)
+    variant_type = Column(String(32), nullable=False)  # HOOK, CAPTION, THUMBNAIL, etc.
+    role = Column(String(32), default="TREATMENT")     # CONTROL or TREATMENT
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    experiment = relationship("Experiment", back_populates="variants")
+    publication = relationship("Publication", lazy="selectin")
+
+class ExperimentResult(Base):
+    __tablename__ = "experiment_results"
+
+    id = Column(String(64), primary_key=True, index=True)
+    experiment_id = Column(String(64), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False, index=True)
+    evaluated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    variant_id = Column(String(64), ForeignKey("experiment_variants.id", ondelete="CASCADE"), nullable=False, index=True)
+    sample_size = Column(Integer, default=0)
+    primary_metric = Column(String(64))
+    metric_value = Column(Float, nullable=True)
+    confidence_interval_low = Column(Float, nullable=True)
+    confidence_interval_high = Column(Float, nullable=True)
+    effect_size_absolute = Column(Float, nullable=True)
+    effect_size_relative = Column(Float, nullable=True)
+    p_value = Column(Float, nullable=True)
+    statistical_significance = Column(Boolean, default=False)
+    practical_significance = Column(Boolean, default=False)
+    status = Column(String(32))
+
+    experiment = relationship("Experiment", back_populates="evaluation_results")
+    variant = relationship("ExperimentVariant", lazy="selectin")

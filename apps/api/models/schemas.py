@@ -857,3 +857,91 @@ class AIInsightPayloadSchema(BaseModel):
     evidence: Dict[str, Any]
     confidence: str
     recommendation: str
+
+# ------------------------------------------------------------------------------
+# Phase 12: Content Experimentation Schemas
+# ------------------------------------------------------------------------------
+
+class ExperimentVariantSchema(BaseModel):
+    id: str
+    experiment_id: str
+    name: str
+    description: Optional[str] = None
+    content_id: Optional[str] = None
+    content_variant_id: Optional[str] = None
+    publication_id: Optional[str] = None
+    variant_type: str
+    role: str
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ExperimentResultResponse(BaseModel):
+    id: str
+    experiment_id: str
+    evaluated_at: Optional[datetime] = None
+    variant_id: str
+    sample_size: int
+    primary_metric: str
+    metric_value: Optional[float] = None
+    confidence_interval_low: Optional[float] = None
+    confidence_interval_high: Optional[float] = None
+    effect_size_absolute: Optional[float] = None
+    effect_size_relative: Optional[float] = None
+    p_value: Optional[float] = None
+    statistical_significance: bool = False
+    practical_significance: bool = False
+    status: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ExperimentWarningSchema(BaseModel):
+    code: str
+    message: str
+
+class ExperimentResponse(BaseModel):
+    id: str
+    name: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    hypothesis: str
+    status: str
+    scope: Optional[str] = None
+    platform: Optional[str] = None
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    minimum_sample_size: int
+    primary_metric: str
+    secondary_metrics: List[str] = []
+    confidence_level: float
+    winner_variant_id: Optional[str] = None
+    conclusion: Optional[str] = None
+    created_by: Optional[str] = None
+    recommendation_id: Optional[str] = None
+    current_sample_size: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ExperimentDetailResponse(BaseModel):
+    experiment: ExperimentResponse
+    variants: List[ExperimentVariantSchema] = []
+    results: List[ExperimentResultResponse] = []
+    warnings: List[ExperimentWarningSchema] = []
+
+class ExperimentCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    hypothesis: str = Field(..., min_length=5)
+    platform: str
+    primary_metric: str = "engagement_rate"
+    secondary_metrics: Optional[List[str]] = []
+    minimum_sample_size: Optional[int] = 5
+    confidence_level: Optional[float] = 0.95
+    scope: str  # HOOK, CAPTION, THUMBNAIL, etc.
+    recommendation_id: Optional[str] = None
+    control_content_id: str
+    control_variant_id: Optional[str] = None
+    control_publication_id: Optional[str] = None
+    treatment_content_id: str
+    treatment_variant_id: Optional[str] = None
+    treatment_publication_id: Optional[str] = None
