@@ -723,3 +723,61 @@ export interface IntelligenceRefreshResponse {
   job_id: string;
   message: string;
 }
+
+// Phase 13: Content Distribution & Automation Types
+export interface AutomationRule {
+  id: string;
+  name: string;
+  description?: string | null;
+  enabled: boolean;
+  trigger_type: string;
+  scope?: string | null;
+  conditions: any[];
+  actions: any[];
+  cooldown_minutes: number;
+  max_runs_per_day: number;
+  created_at: string;
+  updated_at: string;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  status: string;
+  created_by?: string | null;
+}
+
+export interface AutomationActionExecution {
+  id: string;
+  execution_id: string;
+  action_type: string;
+  status: string;
+  job_id?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  result: Record<string, any>;
+  error?: string | null;
+}
+
+export interface AutomationExecution {
+  id: string;
+  automation_id: string;
+  trigger_event: string;
+  trigger_entity_id: string;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  execution_key: string;
+  created_at: string;
+  action_executions: AutomationActionExecution[];
+}
+
+export interface AutomationDetailResponse {
+  rule: AutomationRule;
+  executions: AutomationExecution[];
+  metrics: {
+    total_runs: number;
+    success_rate: number;
+    failed_runs: number;
+    skipped_runs: number;
+  };
+}
+

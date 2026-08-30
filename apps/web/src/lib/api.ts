@@ -658,6 +658,95 @@ class ApiClient {
       body: JSON.stringify(data)
     });
   }
+
+  // Phase 13 Automation Endpoints
+  async getAutomationRules(userId?: string): Promise<import('@/types').AutomationRule[]> {
+    return this.request<import('@/types').AutomationRule[]>('/api/automations', {
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async getAutomationRule(id: string, userId?: string): Promise<import('@/types').AutomationDetailResponse> {
+    return this.request<import('@/types').AutomationDetailResponse>(`/api/automations/${id}`, {
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async createAutomationRule(data: any, userId?: string): Promise<import('@/types').AutomationRule> {
+    return this.request<import('@/types').AutomationRule>('/api/automations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'X-User-Id': userId } : {})
+      },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateAutomationRule(id: string, data: any, userId?: string): Promise<import('@/types').AutomationRule> {
+    return this.request<import('@/types').AutomationRule>(`/api/automations/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'X-User-Id': userId } : {})
+      },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteAutomationRule(id: string, userId?: string): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/api/automations/${id}`, {
+      method: 'DELETE',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async enableAutomationRule(id: string, userId?: string): Promise<import('@/types').AutomationRule> {
+    return this.request<import('@/types').AutomationRule>(`/api/automations/${id}/enable`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async disableAutomationRule(id: string, userId?: string): Promise<import('@/types').AutomationRule> {
+    return this.request<import('@/types').AutomationRule>(`/api/automations/${id}/disable`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async runAutomationRuleManual(id: string, entityId: string, userId?: string): Promise<import('@/types').AutomationExecution> {
+    return this.request<import('@/types').AutomationExecution>(`/api/automations/${id}/run?entity_id=${encodeURIComponent(entityId)}`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async dryRunAutomationRule(id: string, entityId: string, userId?: string): Promise<{
+    status: string;
+    conditions_passed: boolean;
+    skip_reason?: string | null;
+    actions_to_execute: string[];
+    preview_message: string;
+  }> {
+    return this.request<{
+      status: string;
+      conditions_passed: boolean;
+      skip_reason?: string | null;
+      actions_to_execute: string[];
+      preview_message: string;
+    }>(`/api/automations/${id}/dry-run?entity_id=${encodeURIComponent(entityId)}`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async createAutomationRuleFromTemplate(template: string, name: string, userId?: string): Promise<import('@/types').AutomationRule> {
+    return this.request<import('@/types').AutomationRule>(`/api/automation-templates/${template}/create?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
 }
 
 export const api = new ApiClient(API_BASE);

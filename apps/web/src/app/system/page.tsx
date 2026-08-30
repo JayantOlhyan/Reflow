@@ -242,11 +242,25 @@ function SystemContent() {
                 <Activity className="w-4 h-4 text-violet-400" />
               </div>
               <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.experiment_engine?.status || 'healthy')}`}>
-                  {healthData.components.experiment_engine?.status || 'Active'}
+                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.experiment_engine?.status || healthData.components.experiments?.status || 'healthy')}`}>
+                  {healthData.components.experiment_engine?.status || healthData.components.experiments?.status || 'Active'}
                 </span>
               </div>
-              <p className="text-xs text-gray-400">{healthData.components.experiment_engine?.details || "Statistical A/B Verification & Z-Test Math"}</p>
+              <p className="text-xs text-gray-400">{healthData.components.experiment_engine?.details || healthData.components.experiments?.details || "Statistical A/B Verification & Z-Test Math"}</p>
+            </div>
+
+            {/* Automation Engine Component (Phase 13) */}
+            <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Automation Engine</span>
+                <Cpu className="w-4 h-4 text-indigo-400" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.automations?.status || 'healthy')}`}>
+                  {healthData.components.automations?.status || 'Active'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400">{healthData.components.automations?.details || "Closed-Loop Event Routing & Safety Limits"}</p>
             </div>
           </div>
         </div>
