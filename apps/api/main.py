@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form, Query, status
+from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form, Query, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
@@ -21,7 +21,7 @@ from models.entities import (
     Content, Asset, ContentVariant, Transcript, TranscriptSegment,
     ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
     Clip, ClipVariant, PlatformConnection, Publication, Workflow, Job, SystemLog,
-    PerformanceInsight, ContentPattern, ContentRecommendation, Experiment
+    PerformanceInsight, ContentPattern, ContentRecommendation, Experiment, ExperimentVariant, ExperimentResult
 )
 from models.schemas import (
     ContentResponse, ContentListResponse, TextContentCreateRequest,
@@ -45,7 +45,9 @@ from models.schemas import (
     PerformanceInsightResponse, ContentPatternResponse, ContentRecommendationResponse,
     ExperimentResponse, TopicPerformanceItem, HookPerformanceItem,
     DurationPerformanceItem, PostingWindowItem, ContentGapItem,
-    IntelligenceOverviewResponse, IntelligenceRefreshResponse
+    IntelligenceOverviewResponse, IntelligenceRefreshResponse,
+    ExperimentVariantSchema, ExperimentResultResponse, ExperimentWarningSchema,
+    ExperimentDetailResponse, ExperimentCreateRequest
 )
 from services.media_service import media_processor
 from services.queue_service import queue_service
@@ -2261,6 +2263,230 @@ async def list_system_logs(db: AsyncSession = Depends(get_db)):
         }
         for l in logs
     ]
+
+# ------------------------------------------------------------------------------
+# Phase 12: Content Experimentation API
+# ------------------------------------------------------------------------------
+
+@app.post("/api/experiments", response_model=ExperimentDetailResponse, tags=["Experiments"])
+async def create_experiment_route(
+    req: ExperimentCreateRequest,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    from services.experiment_service import experiment_service
+    try:
+        # Create experiment and default variants via service
+        exp = await experiment_service.create_experiment(
+            db=db,
+            name=req.name,
+            hypothesis=req.hypothesis,
+            platform=req.platform,
+            primary_metric=req.primary_metric,
+            scope=req.scope,
+            control_content_id=req.control_content_id,
+            treatment_content_id=req.treatment_content_id,
+            control_variant_id=req.control_variant_id,
+            treatment_variant_id=req.treatment_variant_id,
+            control_publication_id=req.control_publication_id,
+            treatment_publication_id=req.treatment_publication_id,
+            secondary_metrics=req.secondary_metrics,
+            minimum_sample_size=req.minimum_sample_size or 5,
+            confidence_level=req.confidence_level or 0.95,
+            recommendation_id=req.recommendation_id,
+            created_by=user_id
+        )
+
+        # Reload experiment and variants to avoid lazy-loading MissingGreenlet error
+        res_exp = await db.execute(
+            select(Experiment)
+            .where(Experiment.id == exp.id)
+            .options(selectinload(Experiment.variants))
+        )
+        exp = res_exp.scalar_one()
+
+        # Trigger design validation
+        warnings = await experiment_service.detect_confounds(db, exp)
+
+        # Fetch clean details response
+        return ExperimentDetailResponse(
+            experiment=ExperimentResponse.model_validate(exp),
+            variants=[ExperimentVariantSchema.model_validate(v) for v in exp.variants],
+            results=[],
+            warnings=[ExperimentWarningSchema(code=w["code"], message=w["message"]) for w in warnings]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/experiments", response_model=List[ExperimentResponse], tags=["Experiments"])
+async def list_experiments(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    query = select(Experiment).order_by(Experiment.created_at.desc())
+    if user_id:
+        query = query.where(or_(Experiment.created_by == None, Experiment.created_by == user_id))
+    
+    res = await db.execute(query)
+    exps = res.scalars().all()
+    return [ExperimentResponse.model_validate(e) for e in exps]
+
+@app.get("/api/experiments/{experiment_id}", response_model=ExperimentDetailResponse, tags=["Experiments"])
+async def get_experiment_details(
+    experiment_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    from services.experiment_service import experiment_service
+    res_exp = await db.execute(
+        select(Experiment)
+        .where(Experiment.id == experiment_id)
+        .options(selectinload(Experiment.variants), selectinload(Experiment.evaluation_results))
+    )
+    exp = res_exp.scalar_one_or_none()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experiment not found.")
+
+    # Ownership checks: Attempt another user's experiment. Verify: 403 or 404
+    if user_id and exp.created_by and exp.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Access denied to this experiment.")
+
+    warnings = await experiment_service.detect_confounds(db, exp)
+
+    return ExperimentDetailResponse(
+        experiment=ExperimentResponse.model_validate(exp),
+        variants=[ExperimentVariantSchema.model_validate(v) for v in exp.variants],
+        results=[ExperimentResultResponse.model_validate(r) for r in exp.evaluation_results],
+        warnings=[ExperimentWarningSchema(code=w["code"], message=w["message"]) for w in warnings]
+    )
+
+@app.post("/api/experiments/{experiment_id}/start", response_model=ExperimentDetailResponse, tags=["Experiments"])
+async def start_experiment(
+    experiment_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    from services.experiment_service import experiment_service
+    res_exp = await db.execute(
+        select(Experiment)
+        .where(Experiment.id == experiment_id)
+        .options(selectinload(Experiment.variants), selectinload(Experiment.evaluation_results))
+    )
+    exp = res_exp.scalar_one_or_none()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experiment not found.")
+
+    if user_id and exp.created_by and exp.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Access denied to this experiment.")
+
+    # Validate design before transitioning to RUNNING
+    warnings = await experiment_service.detect_confounds(db, exp)
+    critical_errors = [w for w in warnings if w["code"] in ["INSUFFICIENT_VARIANTS", "INSUFFICIENT_DESIGN", "PLATFORM_MISMATCH"]]
+    if critical_errors:
+        raise HTTPException(status_code=400, detail=f"Cannot start experiment due to critical design flaws: {critical_errors[0]['message']}")
+
+    exp.status = "RUNNING"
+    exp.started_at = datetime.utcnow()
+    await db.commit()
+
+    # Reload to ensure updated status is cleanly returned with relationship data loaded
+    res_exp2 = await db.execute(
+        select(Experiment)
+        .where(Experiment.id == experiment_id)
+        .options(selectinload(Experiment.variants), selectinload(Experiment.evaluation_results))
+    )
+    exp = res_exp2.scalar_one()
+
+    return ExperimentDetailResponse(
+        experiment=ExperimentResponse.model_validate(exp),
+        variants=[ExperimentVariantSchema.model_validate(v) for v in exp.variants],
+        results=[ExperimentResultResponse.model_validate(r) for r in exp.evaluation_results],
+        warnings=[ExperimentWarningSchema(code=w["code"], message=w["message"]) for w in warnings]
+    )
+
+@app.post("/api/experiments/{experiment_id}/refresh", response_model=ApiResponse, tags=["Experiments"])
+async def refresh_experiment_evaluation(
+    experiment_id: str,
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    exp = await db.get(Experiment, experiment_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experiment not found.")
+
+    if user_id and exp.created_by and exp.created_by != user_id:
+        raise HTTPException(status_code=403, detail="Access denied to this experiment.")
+
+    # Enqueue background evaluation job
+    job_id = f"job_exp_{uuid.uuid4().hex[:8]}"
+    job = Job(
+        id=job_id,
+        type="EXPERIMENT_EVALUATION",
+        status="QUEUED",
+        created_at=datetime.utcnow()
+    )
+    db.add(job)
+    await db.commit()
+
+    await queue_service.enqueue_media_job(
+        job_id=job_id,
+        job_type="EXPERIMENT_EVALUATION",
+        experiment_id=experiment_id
+    )
+
+    logger.info(f"Enqueued EXPERIMENT_EVALUATION job {job_id} for experiment {experiment_id}.")
+    return ApiResponse(
+        status="success",
+        message="Experiment evaluation job queued successfully.",
+        data={"job_id": job_id}
+    )
+
+@app.get("/api/experiments/export", tags=["Experiments"])
+async def export_experiments_route(
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: AsyncSession = Depends(get_db)
+):
+    # Retrieve all experiments
+    query = select(Experiment).options(
+        selectinload(Experiment.variants),
+        selectinload(Experiment.evaluation_results)
+    )
+    if user_id:
+        query = query.where(or_(Experiment.created_by == None, Experiment.created_by == user_id))
+
+    res = await db.execute(query)
+    exps = res.scalars().all()
+
+    import csv
+    import io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "experiment_id", "experiment_name", "hypothesis", "scope", "platform", "status",
+        "primary_metric", "sample_size", "winner_variant_id", "conclusion", "created_by",
+        "variant_id", "variant_name", "role", "metric_value", "p_value", "statistical_significance", "practical_significance"
+    ])
+
+    for exp in exps:
+        for var in exp.variants:
+            # find result scorecard for this variant
+            card = next((r for r in exp.evaluation_results if r.variant_id == var.id), None)
+            writer.writerow([
+                exp.id, exp.name or exp.title or "", exp.hypothesis, exp.scope, exp.platform, exp.status,
+                exp.primary_metric, card.sample_size if card else 0, exp.winner_variant_id or "", exp.conclusion or "", exp.created_by or "",
+                var.id, var.name, var.role,
+                card.metric_value if card else "",
+                card.p_value if card else "",
+                card.statistical_significance if card else "",
+                card.practical_significance if card else ""
+            ])
+
+    from fastapi.responses import Response
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=experiments_export.csv"}
+    )
 
 if __name__ == "__main__":
     import uvicorn

@@ -227,6 +227,13 @@ async def process_single_job(payload: dict) -> bool:
             # 11. Run full content intelligence and pattern analysis pipeline
             await intelligence_service.run_full_analysis()
 
+        elif job_type == "EXPERIMENT_EVALUATION":
+            # 12. Run A/B test evaluation and statistical analysis
+            experiment_id = payload.get("experiment_id")
+            from services.experiment_service import experiment_service
+            async with async_session_factory() as session:
+                await experiment_service.evaluate_experiment(session, experiment_id)
+
         # Mark Job SUCCEEDED
         async with async_session_factory() as session:
             job_res = await session.execute(select(Job).where(Job.id == job_id))

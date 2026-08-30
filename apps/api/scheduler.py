@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.append(os.path.dirname(__file__))
 
@@ -19,6 +19,7 @@ async def run_scheduler():
 
     last_analytics_sweep = datetime.utcnow() - timedelta(minutes=settings.ANALYTICS_SYNC_INTERVAL_MINUTES)
     last_intelligence_sweep = datetime.utcnow() - timedelta(hours=settings.INTELLIGENCE_STALE_AFTER_HOURS)
+    last_experiment_sweep = datetime.utcnow() - timedelta(minutes=15)
 
     while True:
         try:
@@ -49,6 +50,35 @@ async def run_scheduler():
                 logger.info("Executing scheduled content intelligence analysis sweep...")
                 await intelligence_service.run_full_analysis()
                 last_intelligence_sweep = now_utc
+
+            # 6. Periodic experiment evaluation sweep (every 15 minutes or when stale)
+            if (now_utc - last_experiment_sweep).total_seconds() >= (15 * 60):
+                from database import async_session_factory
+                from models.entities import Experiment, Job
+                from services.queue_service import queue_service
+                import uuid
+                logger.info("Executing scheduled content experiments evaluation sweep...")
+                async with async_session_factory() as session:
+                    res = await session.execute(
+                        select(Experiment).where(Experiment.status == "RUNNING")
+                    )
+                    running_exps = res.scalars().all()
+                    for exp in running_exps:
+                        job_id = f"job_exp_{uuid.uuid4().hex[:8]}"
+                        eval_job = Job(
+                            id=job_id,
+                            type="EXPERIMENT_EVALUATION",
+                            status="QUEUED",
+                            created_at=datetime.utcnow()
+                        )
+                        session.add(eval_job)
+                        await session.commit()
+                        await queue_service.enqueue_media_job(
+                            job_id=job_id,
+                            job_type="EXPERIMENT_EVALUATION",
+                            experiment_id=exp.id
+                        )
+                last_experiment_sweep = now_utc
 
             await asyncio.sleep(settings.SCHEDULER_POLL_INTERVAL_SECONDS)
 
