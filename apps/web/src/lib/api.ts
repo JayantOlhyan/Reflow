@@ -592,8 +592,49 @@ class ApiClient {
     return this.request<import('@/types').ContentGapItem[]>('/api/intelligence/content-gaps');
   }
 
-  async getExperiments(): Promise<import('@/types').Experiment[]> {
-    return this.request<import('@/types').Experiment[]>('/api/intelligence/experiments');
+  async getExperiments(userId?: string): Promise<import('@/types').Experiment[]> {
+    return this.getExperimentsList(userId);
+  }
+
+  async getExperimentsList(userId?: string): Promise<import('@/types').Experiment[]> {
+    return this.request<import('@/types').Experiment[]>('/api/experiments', {
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async getExperimentDetails(id: string, userId?: string): Promise<import('@/types').ExperimentDetailResponse> {
+    return this.request<import('@/types').ExperimentDetailResponse>(`/api/experiments/${id}`, {
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async createExperiment(data: any, userId?: string): Promise<import('@/types').ExperimentDetailResponse> {
+    return this.request<import('@/types').ExperimentDetailResponse>('/api/experiments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'X-User-Id': userId } : {})
+      },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async startExperiment(id: string, userId?: string): Promise<import('@/types').ExperimentDetailResponse> {
+    return this.request<import('@/types').ExperimentDetailResponse>(`/api/experiments/${id}/start`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  async refreshExperiment(id: string, userId?: string) {
+    return this.request<{ status: string; message: string; data: { job_id: string } }>(`/api/experiments/${id}/refresh`, {
+      method: 'POST',
+      headers: userId ? { 'X-User-Id': userId } : undefined
+    });
+  }
+
+  exportExperimentsCsvUrl(userId?: string): string {
+    return `${this.baseUrl}/api/experiments/export${userId ? `?user_id=${userId}` : ''}`;
   }
 
   async refreshIntelligence(): Promise<import('@/types').IntelligenceRefreshResponse> {

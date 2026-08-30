@@ -591,17 +591,70 @@ export interface ContentRecommendation {
 
 export interface Experiment {
   id: string;
-  title: string;
+  name: string;
+  description?: string | null;
   hypothesis: string;
-  variable_tested: string;
-  control_baseline?: number | null;
-  success_metric: string;
-  target_sample_size: number;
-  current_sample_size: number;
-  status: 'DRAFT' | 'RUNNING' | 'CONCLUDED' | 'ABANDONED';
-  results: Record<string, any>;
+  status: 'DRAFT' | 'READY' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED' | 'INSUFFICIENT_DATA';
+  scope: 'HOOK' | 'CAPTION' | 'THUMBNAIL' | 'TITLE' | 'DURATION' | 'FORMAT' | 'CAROUSEL_TEMPLATE' | 'CTA' | 'POSTING_WINDOW';
+  platform?: string | null;
   created_at: string;
-  updated_at: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  minimum_sample_size: number;
+  primary_metric: string;
+  secondary_metrics: string[];
+  confidence_level: number;
+  winner_variant_id?: string | null;
+  conclusion?: string | null;
+  created_by?: string | null;
+  recommendation_id?: string | null;
+
+  // Backwards compatibility fields for Phase 11
+  title?: string | null;
+  variable_tested?: string | null;
+  success_metric?: string | null;
+  target_sample_size?: number | null;
+  current_sample_size?: number | null;
+  control_baseline?: number | null;
+}
+
+export interface ExperimentVariant {
+  id: string;
+  experiment_id: string;
+  name: string;
+  description?: string | null;
+  content_id: string;
+  content_variant_id?: string | null;
+  publication_id?: string | null;
+  variant_type?: string | null;
+  role: 'CONTROL' | 'TREATMENT';
+  created_at: string;
+}
+
+export interface ExperimentResult {
+  id: string;
+  experiment_id: string;
+  variant_id: string;
+  sample_size: number;
+  metric_value?: number | null;
+  abs_effect_size?: number | null;
+  rel_effect_size?: number | null;
+  p_value?: number | null;
+  statistical_significance: boolean;
+  practical_significance: boolean;
+  evaluated_at: string;
+}
+
+export interface ExperimentWarning {
+  code: string;
+  message: string;
+}
+
+export interface ExperimentDetailResponse {
+  experiment: Experiment;
+  variants: ExperimentVariant[];
+  results: ExperimentResult[];
+  warnings: ExperimentWarning[];
 }
 
 export interface TopicPerformanceItem {

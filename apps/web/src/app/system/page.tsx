@@ -234,6 +234,20 @@ function SystemContent() {
               </div>
               <p className="text-xs text-gray-400">{healthData.components.intelligence?.details || "Pattern Detection & Anti-Hallucination Recs"}</p>
             </div>
+
+            {/* Experimentation Engine Component (Phase 12) */}
+            <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">Experiment Engine</span>
+                <Activity className="w-4 h-4 text-violet-400" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 rounded text-xs font-bold capitalize border ${getStatusColor(healthData.components.experiment_engine?.status || 'healthy')}`}>
+                  {healthData.components.experiment_engine?.status || 'Active'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400">{healthData.components.experiment_engine?.details || "Statistical A/B Verification & Z-Test Math"}</p>
+            </div>
           </div>
         </div>
       )}

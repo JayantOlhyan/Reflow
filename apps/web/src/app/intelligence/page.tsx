@@ -639,11 +639,11 @@ export default function IntelligencePage() {
                     <div>Control Baseline: <strong className="text-slate-200">{exp.control_baseline != null ? `${exp.control_baseline}%` : '—'}</strong></div>
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/80">
-                    <span>Progress: <strong className="text-slate-200">{exp.current_sample_size}/{exp.target_sample_size}</strong> posts</span>
+                    <span>Progress: <strong className="text-slate-200">{exp.current_sample_size ?? 0}/{exp.target_sample_size ?? 5}</strong> posts</span>
                     <div className="w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-primary" 
-                        style={{ width: `${Math.min(100, (exp.current_sample_size / exp.target_sample_size) * 100)}%` }} 
+                        style={{ width: `${Math.min(100, ((exp.current_sample_size ?? 0) / (exp.target_sample_size ?? 5)) * 100)}%` }} 
                       />
                     </div>
                   </div>
