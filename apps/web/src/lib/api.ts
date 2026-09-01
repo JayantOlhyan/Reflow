@@ -12,7 +12,7 @@ import {
   PlatformAnalyticsItem, ContentAnalyticsItem
 } from '@/types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 class ApiClient {
   public baseUrl: string;
@@ -224,6 +224,24 @@ class ApiClient {
 
   async getContentClips(contentId: string): Promise<ClipListResponse> {
     return this.request<ClipListResponse>(`/api/content/${contentId}/clips`);
+  }
+
+  async getClips(contentId?: string): Promise<ClipListResponse> {
+    if (contentId) return this.getContentClips(contentId);
+    return this.request<ClipListResponse>('/api/clips');
+  }
+
+  async getCarousels(contentId?: string): Promise<CarouselListResponse> {
+    const qs = contentId ? `?content_id=${encodeURIComponent(contentId)}` : '';
+    return this.request<CarouselListResponse>(`/api/carousels${qs}`);
+  }
+
+  async getGovernanceResult(contentId: string): Promise<any> {
+    return this.request<any>(`/api/content/${contentId}/governance`);
+  }
+
+  async uploadContent(file: File, title?: string): Promise<ContentItem> {
+    return this.uploadFile(file, title);
   }
 
   async getClip(clipId: string): Promise<ClipItem> {
@@ -795,6 +813,50 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
+  }
+
+  // Phase 16: Notifications & Search APIs
+  async getNotifications(limit = 50, unreadOnly = false): Promise<{ items: any[]; unread_count: number }> {
+    const qs = `?limit=${limit}&unread_only=${unreadOnly}`;
+    return this.request<{ items: any[]; unread_count: number }>(`/api/notifications${qs}`);
+  }
+
+  async markNotificationRead(id: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/api/notifications/${id}/read`, {
+      method: 'POST'
+    });
+  }
+
+  async markAllNotificationsRead(): Promise<{ status: string; marked_read_count: number }> {
+    return this.request<{ status: string; marked_read_count: number }>('/api/notifications/read-all', {
+      method: 'POST'
+    });
+  }
+
+  async searchEntities(q: string): Promise<{ query: string; results: any[] }> {
+    return this.request<{ query: string; results: any[] }>(`/api/search?q=${encodeURIComponent(q)}`);
+  }
+
+  async approvePublication(pubId: string): Promise<PublicationItem> {
+    return this.request<PublicationItem>(`/api/publications/${pubId}/approve`, {
+      method: 'POST'
+    });
+  }
+
+  async approveBatchPublications(publicationIds: string[]): Promise<{ status: string; approved_count: number; skipped_count: number }> {
+    return this.request<{ status: string; approved_count: number; skipped_count: number }>('/api/publications/approve-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(publicationIds)
+    });
+  }
+
+  async getClipDetail(clipId: string): Promise<ClipItem> {
+    return this.request<ClipItem>(`/api/clips/${clipId}`);
+  }
+
+  async getCarouselDetail(carouselId: string): Promise<CarouselItem> {
+    return this.request<CarouselItem>(`/api/carousels/${carouselId}`);
   }
 }
 
