@@ -1,0 +1,70 @@
+name: Reflow CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, "phase-*" ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-test:
+    name: Backend Pytest Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install FFmpeg & System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libpq-dev
+
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r apps/api/requirements.txt pytest pytest-asyncio pytest-cov
+
+      - name: Run Pytest Test Suite
+        env:
+          ENVIRONMENT: test
+          ENCRYPTION_SECRET: reflow_dev_secret_key_change_in_production_32b
+          DATABASE_URL: sqlite+aiosqlite:///./test_reflow.db
+        run: |
+          cd apps/api
+          pytest -v
+
+  frontend-build:
+    name: Frontend Build & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install Dependencies & Build
+        run: |
+          cd apps/web
+          npm ci
+          npm run build
+
+  docker-build:
+    name: Docker Compose Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env from template
+        run: cp .env.example .env
+
+      - name: Build Docker Services
+        run: docker compose build
