@@ -183,7 +183,7 @@ export default function OverviewPage() {
                     <span className="font-medium text-white">{p.title || p.id}</span>
                   </div>
                   <span className="text-slate-400 font-mono text-[11px]">
-                    {p.scheduled_for ? new Date(p.scheduled_for).toLocaleString() : 'Pending'}
+                    {p.scheduled_at ? new Date(p.scheduled_at).toLocaleString() : 'Pending'}
                   </span>
                 </div>
               ))}
