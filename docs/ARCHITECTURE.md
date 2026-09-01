@@ -143,3 +143,17 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 - **Conjunction / Condition Evaluations**: Compares properties dynamically (e.g., matching aspect ratio layout or durations) before dispatching actions.
 - **Failure Isolation & History Tracing**: Allows re-execution of individual failed actions inside a pipeline without rollback of sibling actions.
 - **Human-in-the-Loop Gates**: Supports `AUTO_APPROVE` or `REQUIRE_APPROVAL` scopes, blocking automated publications until manually approved.
+
+### 2.13 Production Hardening & Infrastructure Resiliency (Phase 15)
+- **Zero-Manual-Setup Containerization**: Docker Compose orchestrates six microservices (`web`, `api`, `worker`, `scheduler`, `postgres`, `redis`) with automated Alembic database migrations (`alembic upgrade head`) via container entrypoint scripts.
+- **Orphaned Job Recovery & Reconciliation**: On worker startup, any jobs left in `RUNNING` status due to container restarts are automatically reset to `QUEUED` and re-enqueued.
+- **Real-Time Telemetry**: Real CPU, RAM, Disk, and Storage metrics gathered via `psutil` or returned as `UNAVAILABLE` without fabricated fallbacks.
+- **Setup Checklist**: First-run experience page (`/setup`) checking database, redis, storage writability, FFmpeg binary, AI keys, and platform connections with `READY` vs `ACTION REQUIRED` statuses.
+
+### 2.14 Security & Defense Architecture (Phase 15)
+- **Token Encryption**: OAuth tokens encrypted at rest via AES-256 Fernet (`ENCRYPTION_SECRET`). Startup enforces custom 32+ char secrets in production mode.
+- **Redacting Log Formatter**: `RedactingFormatter` automatically redacts API keys, Bearer tokens, passwords, and client secrets from standard log outputs.
+- **SSRF Protection**: `validate_url_ssrf` validates external URL targets against private IP ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.169.254`) and internal container names.
+- **Upload Hardening**: Path traversal protection (`os.path.basename`), MIME/extension whitelist, and `MAX_UPLOAD_SIZE_MB` size limit enforcement.
+- **Command Safety**: All FFmpeg/FFprobe invocations execute via list-based `asyncio.create_subprocess_exec` without shell string interpolation.
+
