@@ -1,0 +1,15 @@
+{
+  "id": "example-ai-provider",
+  "name": "Example AI Provider (EXAMPLE ONLY)",
+  "version": "1.0.0",
+  "description": "Demonstrates custom AI provider plugin contract (EXAMPLE ONLY).",
+  "author": "Reflow Community",
+  "type": "AI_PROVIDER",
+  "entrypoint": "example_ai:ExampleAIPlugin",
+  "api_version": "1.0.0",
+  "capabilities": ["text_generation", "structured_output"],
+  "permissions": ["CONTENT_READ"],
+  "configuration": {
+    "api_key": "string"
+  }
+}
