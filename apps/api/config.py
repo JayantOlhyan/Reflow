@@ -1,20 +1,34 @@
 import os
-from typing import List, Optional
+import json
+from typing import List, Optional, Union
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
     APP_NAME: str = "Reflow API"
     APP_VERSION: str = "1.0.0"
     ENVIRONMENT: str = Field(default="development", description="development | production | test")
+    DEPLOYMENT_MODE: str = Field(default="single_user", description="single_user | multi_user")
     DEBUG: bool = Field(default=False)
     HOST: str = Field(default="0.0.0.0")
     PORT: int = Field(default=8000)
     
     # CORS
-    CORS_ORIGINS: List[str] = Field(
+    CORS_ORIGINS: Union[List[str], str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000", "*"]
     )
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            v_str = v.strip()
+            if v_str.startswith("[") and v_str.endswith("]"):
+                try:
+                    return json.loads(v_str)
+                except Exception:
+                    pass
+            return [origin.strip() for origin in v_str.split(",") if origin.strip()]
+        return v
     
     # Database
     DATABASE_URL: str = Field(
@@ -29,6 +43,7 @@ class Settings(BaseSettings):
     STORAGE_ACCESS_KEY: Optional[str] = None
     STORAGE_SECRET_KEY: Optional[str] = None
     MAX_UPLOAD_SIZE_MB: int = Field(default=500, description="Max upload size in Megabytes")
+    STORAGE_WARNING_THRESHOLD_PERCENT: int = Field(default=85, description="Storage alert threshold percentage")
     
     # Queue / Cache (Redis)
     REDIS_URL: Optional[str] = Field(default="redis://localhost:6379/0")
@@ -50,6 +65,11 @@ class Settings(BaseSettings):
         default="reflow_dev_secret_key_change_in_production_32b",
         description="Master server key used to encrypt OAuth tokens at rest"
     )
+    RATE_LIMIT_PER_MINUTE: int = Field(default=60, description="Rate limit per IP for expensive endpoints")
+
+    # Observability
+    LOG_LEVEL: str = Field(default="INFO", description="DEBUG | INFO | WARNING | ERROR")
+    METRICS_ENABLED: bool = Field(default=True, description="Enable system metrics endpoints")
 
     # Platform App OAuth Credentials (Configured by self-hosted admin)
     YOUTUBE_CLIENT_ID: Optional[str] = None
@@ -207,6 +227,19 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+
+def validate_secrets():
+    """Validates critical security secret strength in production mode."""
+    if settings.ENVIRONMENT.lower() == "production":
+        default_secret = "reflow_dev_secret_key_change_in_production_32b"
+        if settings.ENCRYPTION_SECRET == default_secret or len(settings.ENCRYPTION_SECRET) < 32:
+            raise ValueError(
+                "CRITICAL SECURITY ERROR: In production mode, ENCRYPTION_SECRET must be set "
+                "to a custom secret key at least 32 characters long. Refusing to start."
+            )
+
+# Execute secret validation
+validate_secrets()
 
 # Ensure local storage directory exists
 os.makedirs(settings.STORAGE_DIR, exist_ok=True)
