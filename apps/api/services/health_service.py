@@ -1,6 +1,5 @@
 import asyncio
 import os
-import subprocess
 from datetime import datetime
 from typing import Dict, Any
 from sqlalchemy import text
@@ -32,7 +31,7 @@ class HealthService:
     async def check_ffmpeg(self) -> Dict[str, str]:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-version",
+                settings.FFMPEG_PATH, "-version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -42,7 +41,7 @@ class HealthService:
                 return {"status": "healthy", "details": first_line}
             return {"status": "unavailable", "details": "FFmpeg exited with non-zero status"}
         except FileNotFoundError:
-            return {"status": "unavailable", "details": "FFmpeg binary not found on PATH"}
+            return {"status": "unavailable", "details": f"FFmpeg binary '{settings.FFMPEG_PATH}' not found on PATH"}
         except Exception as e:
             return {"status": "unavailable", "details": str(e)}
 
@@ -56,17 +55,19 @@ class HealthService:
             await client.aclose()
             return {"status": "healthy", "details": "Redis ping successful"}
         except Exception as e:
-            return {"status": "degraded", "details": f"Redis unavailable: {str(e)} (Optional in Phase 0)"}
+            return {"status": "unavailable", "details": f"Redis connection error: {str(e)}"}
 
     def check_ai_providers(self) -> Dict[str, str]:
         has_gemini = bool(settings.GEMINI_API_KEY)
         has_openai = bool(settings.OPENAI_API_KEY)
-        if has_gemini or has_openai:
+        has_anthropic = bool(settings.ANTHROPIC_API_KEY)
+        if has_gemini or has_openai or has_anthropic:
             providers = []
             if has_gemini: providers.append("Gemini")
             if has_openai: providers.append("OpenAI")
+            if has_anthropic: providers.append("Anthropic")
             return {"status": "healthy", "details": f"Configured providers: {', '.join(providers)}"}
-        return {"status": "not_configured", "details": "No API keys configured (offline mock active)"}
+        return {"status": "not_configured", "details": "No AI API keys configured"}
 
     def check_scheduler(self) -> Dict[str, str]:
         from services.scheduler_service import scheduler_service
@@ -85,121 +86,82 @@ class HealthService:
     def check_intelligence(self) -> Dict[str, Any]:
         return {
             "status": "healthy",
-            "details": f"Min Sample Threshold: {settings.MIN_RECOMMENDATION_SAMPLES} posts, Stale Threshold: {settings.INTELLIGENCE_STALE_AFTER_HOURS}h"
+            "details": f"Min Sample Threshold: {settings.MIN_RECOMMENDATION_SAMPLES} posts"
         }
 
-    async def check_experiment_engine(self) -> Dict[str, Any]:
+    async def get_system_metrics(self) -> Dict[str, Any]:
+        """Returns real local CPU, memory, disk, and storage metrics or UNAVAILABLE."""
         try:
-            from database import async_session_factory
-            from models.entities import Experiment, Job
-            from sqlalchemy import select, func, and_
-            async with async_session_factory() as session:
-                active_res = await session.execute(
-                    select(func.count(Experiment.id)).where(Experiment.status == "RUNNING")
-                )
-                active_count = active_res.scalar() or 0
+            import psutil
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            disk = psutil.disk_usage(settings.STORAGE_DIR if os.path.exists(settings.STORAGE_DIR) else "/")
 
-                queued_res = await session.execute(
-                    select(func.count(Job.id)).where(
-                        and_(Job.type == "EXPERIMENT_EVALUATION", Job.status == "QUEUED")
-                    )
-                )
-                queued_count = queued_res.scalar() or 0
-
-                last_success_res = await session.execute(
-                    select(Job.completed_at)
-                    .where(and_(Job.type == "EXPERIMENT_EVALUATION", Job.status == "SUCCEEDED"))
-                    .order_by(Job.completed_at.desc())
-                    .limit(1)
-                )
-                last_success = last_success_res.scalar()
-
-                last_fail_res = await session.execute(
-                    select(Job.completed_at)
-                    .where(and_(Job.type == "EXPERIMENT_EVALUATION", Job.status == "FAILED"))
-                    .order_by(Job.completed_at.desc())
-                    .limit(1)
-                )
-                last_fail = last_fail_res.scalar()
-
-            status = "healthy"
-            if queued_count > 10:
-                status = "degraded"
+            db_health = await self.check_database()
+            redis_health = await self.check_redis()
 
             return {
-                "status": status,
-                "details": f"Active: {active_count}, Queued: {queued_count}",
-                "metrics": {
-                    "active_experiments": active_count,
-                    "queued_evaluations": queued_count,
-                    "last_successful_evaluation": last_success.isoformat() if last_success else None,
-                    "last_failed_evaluation": last_fail.isoformat() if last_fail else None
-                }
+                "status": "AVAILABLE",
+                "version": settings.APP_VERSION,
+                "cpu": {
+                    "usage_percent": cpu_pct,
+                    "count": psutil.cpu_count()
+                },
+                "memory": {
+                    "total_mb": round(mem.total / (1024 * 1024), 2),
+                    "used_mb": round(mem.used / (1024 * 1024), 2),
+                    "free_mb": round(mem.available / (1024 * 1024), 2),
+                    "usage_percent": mem.percent
+                },
+                "disk": {
+                    "total_gb": round(disk.total / (1024**3), 2),
+                    "used_gb": round(disk.used / (1024**3), 2),
+                    "free_gb": round(disk.free / (1024**3), 2),
+                    "usage_percent": disk.percent,
+                    "warning": disk.percent >= settings.STORAGE_WARNING_THRESHOLD_PERCENT
+                },
+                "database_connected": db_health["status"] == "healthy",
+                "redis_connected": redis_health["status"] == "healthy",
+                "timestamp": datetime.utcnow().isoformat() + "Z"
             }
-        except Exception as e:
-            return {"status": "degraded", "details": f"Error: {e}"}
-
-    async def check_automation_engine(self) -> Dict[str, Any]:
-        try:
-            from database import async_session_factory
-            from models.entities import AutomationRule, AutomationExecution
-            from sqlalchemy import select, func, or_
-            async with async_session_factory() as session:
-                active_rules_res = await session.execute(
-                    select(func.count(AutomationRule.id)).where(AutomationRule.status == "ACTIVE")
-                )
-                active_rules = active_rules_res.scalar() or 0
-
-                active_execs_res = await session.execute(
-                    select(func.count(AutomationExecution.id)).where(
-                        AutomationExecution.status.in_(["QUEUED", "RUNNING"])
-                    )
-                )
-                active_execs = active_execs_res.scalar() or 0
-
-                succeeded_res = await session.execute(
-                    select(func.count(AutomationExecution.id)).where(AutomationExecution.status == "SUCCEEDED")
-                )
-                succeeded = succeeded_res.scalar() or 0
-
-                failed_res = await session.execute(
-                    select(func.count(AutomationExecution.id)).where(AutomationExecution.status == "FAILED")
-                )
-                failed = failed_res.scalar() or 0
-
-                last_exec_res = await session.execute(
-                    select(AutomationExecution.created_at)
-                    .order_by(AutomationExecution.created_at.desc())
-                    .limit(1)
-                )
-                last_exec = last_exec_res.scalar()
-
-                last_fail_res = await session.execute(
-                    select(AutomationExecution.completed_at)
-                    .where(AutomationExecution.status == "FAILED")
-                    .order_by(AutomationExecution.completed_at.desc())
-                    .limit(1)
-                )
-                last_fail = last_fail_res.scalar()
-
-            status = "healthy"
-            if active_execs > 20:
-                status = "degraded"
-
+        except Exception:
             return {
-                "status": status,
-                "details": f"Active Rules: {active_rules}, Running: {active_execs}",
-                "metrics": {
-                    "active_rules": active_rules,
-                    "running_executions": active_execs,
-                    "successful_executions": succeeded,
-                    "failed_executions": failed,
-                    "last_execution": last_exec.isoformat() if last_exec else None,
-                    "last_failure": last_fail.isoformat() if last_fail else None
-                }
+                "status": "UNAVAILABLE",
+                "version": settings.APP_VERSION,
+                "cpu": None,
+                "memory": None,
+                "disk": None,
+                "database_connected": None,
+                "redis_connected": None,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
             }
-        except Exception as e:
-            return {"status": "degraded", "details": f"Error: {e}"}
+
+    async def get_readiness_status(self) -> Dict[str, Any]:
+        """Dependency readiness check endpoint (/health/ready)."""
+        db_res = await self.check_database()
+        storage_res = await self.check_storage()
+        ffmpeg_res = await self.check_ffmpeg()
+        redis_res = await self.check_redis()
+        ai_res = self.check_ai_providers()
+
+        is_ready = (
+            db_res["status"] == "healthy" and
+            storage_res["status"] == "healthy" and
+            ffmpeg_res["status"] == "healthy"
+        )
+
+        return {
+            "status": "READY" if is_ready else "ACTION_REQUIRED",
+            "version": settings.APP_VERSION,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "dependencies": {
+                "database": db_res,
+                "storage": storage_res,
+                "ffmpeg": ffmpeg_res,
+                "redis": redis_res,
+                "ai": ai_res
+            }
+        }
 
     async def get_overall_health(self) -> Dict[str, Any]:
         db_res = await self.check_database()
@@ -210,8 +172,6 @@ class HealthService:
         scheduler_res = self.check_scheduler()
         analytics_res = self.check_analytics()
         intelligence_res = self.check_intelligence()
-        experiments_res = await self.check_experiment_engine()
-        automations_res = await self.check_automation_engine()
 
         components = {
             "database": db_res,
@@ -221,17 +181,15 @@ class HealthService:
             "ai": ai_res,
             "scheduler": scheduler_res,
             "analytics": analytics_res,
-            "intelligence": intelligence_res,
-            "experiments": experiments_res,
-            "automations": automations_res
+            "intelligence": intelligence_res
         }
 
-        # Overall status is healthy if critical services (db & storage) are healthy
         is_healthy = db_res["status"] == "healthy" and storage_res["status"] == "healthy"
         overall_status = "healthy" if is_healthy else "degraded"
 
         return {
             "status": overall_status,
+            "version": settings.APP_VERSION,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "components": components
         }
