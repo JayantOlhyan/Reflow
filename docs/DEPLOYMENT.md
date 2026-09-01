@@ -46,6 +46,32 @@ The Docker Compose setup starts 6 containerized microservices:
 
 ---
 
+## 5. Performance & Resource Tuning
+
+Reflow provides environment variables to tune worker concurrency and database connection pools for your target hardware node:
+
+```env
+# Concurrency & Queue Limits
+MEDIA_WORKER_CONCURRENCY=2
+AI_WORKER_CONCURRENCY=3
+PUBLISH_WORKER_CONCURRENCY=5
+WEBHOOK_WORKER_CONCURRENCY=5
+MAX_QUEUE_DEPTH=100
+
+# Storage & Quotas
+MAX_STORAGE_GB=50.0
+TEMP_STORAGE_LIMIT_GB=10.0
+
+# Database Async Connection Pool
+DB_POOL_SIZE=20
+DB_MAX_OVERFLOW=10
+DB_POOL_TIMEOUT=30
+DB_POOL_RECYCLE=1800
+```
+For detailed hardware profiles and capacity guidelines, review [`docs/CAPACITY.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/docs/CAPACITY.md) and [`docs/PERFORMANCE.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/docs/PERFORMANCE.md).
+
+---
+
 ## 3. Database Migrations
 
 Reflow manages schema migrations using **Alembic**.
