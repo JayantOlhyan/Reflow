@@ -915,6 +915,72 @@ class ApiClient {
   async revokeApiKey(keyId: string): Promise<any> {
     return this.request<any>(`/api/auth/api-keys/${keyId}`, { method: 'DELETE' });
   }
+
+  // Phase 18: Ecosystem & Integration Hub API Methods
+  async getEcosystemPlugins(params?: {
+    q?: string;
+    category?: string;
+    source?: string;
+    installed_only?: boolean;
+    updates_only?: boolean;
+  }): Promise<{ plugins: import('@/types').EcosystemPluginItem[]; total: number; registry_url: string }> {
+    const query = new URLSearchParams();
+    if (params?.q) query.append('q', params.q);
+    if (params?.category) query.append('category', params.category);
+    if (params?.source) query.append('source', params.source);
+    if (params?.installed_only) query.append('installed_only', 'true');
+    if (params?.updates_only) query.append('updates_only', 'true');
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request<{ plugins: import('@/types').EcosystemPluginItem[]; total: number; registry_url: string }>(`/api/ecosystem/plugins${qs}`);
+  }
+
+  async getEcosystemPluginDetail(pluginId: string): Promise<import('@/types').EcosystemPluginItem> {
+    return this.request<import('@/types').EcosystemPluginItem>(`/api/ecosystem/plugins/${pluginId}`);
+  }
+
+  async getEcosystemCategories(): Promise<{ categories: { id: string; name: string }[] }> {
+    return this.request<{ categories: { id: string; name: string }[] }>('/api/ecosystem/categories');
+  }
+
+  async refreshEcosystemCatalog(): Promise<any> {
+    return this.request<any>('/api/ecosystem/refresh', { method: 'POST' });
+  }
+
+  async installPlugin(pluginId: string, version?: string, source?: string, acceptPermissions = true): Promise<any> {
+    return this.request<any>('/api/plugins/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugin_id: pluginId, version, source, accept_permissions: acceptPermissions })
+    });
+  }
+
+  async updatePlugin(pluginId: string, confirm = true): Promise<any> {
+    return this.request<any>(`/api/plugins/${pluginId}/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm })
+    });
+  }
+
+  async uninstallPlugin(pluginId: string): Promise<any> {
+    return this.request<any>(`/api/plugins/${pluginId}/uninstall`, { method: 'POST' });
+  }
+
+  async configurePlugin(pluginId: string, config: Record<string, any>): Promise<any> {
+    return this.request<any>(`/api/plugins/${pluginId}/configure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config })
+    });
+  }
+
+  async getPluginAuditLog(pluginId: string): Promise<import('@/types').PluginAuditLogItem[]> {
+    return this.request<import('@/types').PluginAuditLogItem[]>(`/api/plugins/${pluginId}/audit-log`);
+  }
+
+  async getEcosystemMetrics(): Promise<any> {
+    return this.request<any>('/api/ecosystem/metrics');
+  }
 }
 
 export const api = new ApiClient(API_BASE);
