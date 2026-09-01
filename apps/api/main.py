@@ -88,37 +88,99 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.CORS_ORIGINS if isinstance(settings.CORS_ORIGINS, list) else [settings.CORS_ORIGINS],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+import time
+from collections import defaultdict
+
+_rate_limit_store = defaultdict(list)
+
+# Request ID, Rate Limiting & /api/v1 Path Aliasing Middleware
+@app.middleware("http")
+async def request_tracing_and_rate_limit_middleware(request: Request, call_next):
+    # Support /api/v1 URL prefix seamlessly
+    if request.url.path.startswith("/api/v1/"):
+        request.scope["path"] = request.url.path.replace("/api/v1/", "/api/", 1)
+
+    req_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4().hex[:12]}"
+    request.state.request_id = req_id
+
+    # Rate limiting for heavy creation/processing routes
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    path = request.url.path
+    if any(path.startswith(prefix) for prefix in ["/api/uploads", "/api/ai", "/api/clips", "/api/carousels", "/api/publications"]):
+        now = time.time()
+        window = 60.0
+        max_requests = settings.RATE_LIMIT_PER_MINUTE
+        history = [t for t in _rate_limit_store[client_ip] if now - t < window]
+        if len(history) >= max_requests:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "message": f"Rate limit exceeded ({max_requests} requests/min). Please try again shortly.",
+                    "request_id": req_id
+                },
+                headers={"X-Request-ID": req_id}
+            )
+        history.append(now)
+        _rate_limit_store[client_ip] = history
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
 # Centralized Error Handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    req_id = getattr(request.state, "request_id", "unknown")
+    detail = exc.detail
+    if isinstance(detail, dict):
+        error_code = detail.get("error", "HTTP_ERROR")
+        message = detail.get("message", str(detail))
+    else:
+        error_code = "HTTP_ERROR"
+        message = str(detail)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"status": "error", "code": exc.status_code, "message": exc.detail}
+        content={"error": error_code, "message": message, "request_id": req_id},
+        headers={"X-Request-ID": req_id}
     )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    req_id = getattr(request.state, "request_id", "unknown")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"status": "validation_error", "message": "Invalid request payload.", "details": exc.errors()}
+        content={
+            "error": "VALIDATION_ERROR",
+            "message": "Invalid request payload.",
+            "details": exc.errors(),
+            "request_id": req_id
+        },
+        headers={"X-Request-ID": req_id}
     )
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled server error on {request.method} {request.url.path}: {exc}")
+    req_id = getattr(request.state, "request_id", "unknown")
+    logger.error(f"[{req_id}] Unhandled server error on {request.method} {request.url.path}: {exc}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"status": "internal_error", "message": "An internal server error occurred."}
+        content={
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": "An internal server error occurred.",
+            "request_id": req_id
+        },
+        headers={"X-Request-ID": req_id}
     )
 
 # ------------------------------------------------------------------------------
-# Health Checks
+# Health & System Telemetry Checks
 # ------------------------------------------------------------------------------
 
 @app.get("/health", tags=["System"])
@@ -129,9 +191,48 @@ async def liveness_probe():
         "version": settings.APP_VERSION
     }
 
-@app.get("/api/system/health", response_model=HealthResponse, tags=["System"])
+@app.get("/health/ready", tags=["System"])
+async def readiness_probe():
+    return await health_service.get_readiness_status()
+
+@app.get("/api/system/health", tags=["System"])
 async def system_health_telemetry():
     return await health_service.get_overall_health()
+
+@app.get("/api/system/metrics", tags=["System"])
+async def system_metrics():
+    return await health_service.get_system_metrics()
+
+@app.get("/api/system/settings", tags=["System"])
+async def get_system_settings():
+    return {
+        "status": "success",
+        "settings": {
+            "gemini_configured": bool(settings.GEMINI_API_KEY),
+            "openai_configured": bool(settings.OPENAI_API_KEY),
+            "anthropic_configured": bool(settings.ANTHROPIC_API_KEY),
+            "storage_provider": settings.STORAGE_PROVIDER,
+            "storage_dir": settings.STORAGE_DIR,
+            "max_upload_size_mb": settings.MAX_UPLOAD_SIZE_MB,
+            "deployment_mode": settings.DEPLOYMENT_MODE,
+            "version": settings.APP_VERSION
+        }
+    }
+
+@app.post("/api/system/settings", tags=["System"])
+async def update_system_settings(payload: Dict[str, Any]):
+    if "gemini_api_key" in payload:
+        settings.GEMINI_API_KEY = payload["gemini_api_key"] or None
+    if "openai_api_key" in payload:
+        settings.OPENAI_API_KEY = payload["openai_api_key"] or None
+    if "anthropic_api_key" in payload:
+        settings.ANTHROPIC_API_KEY = payload["anthropic_api_key"] or None
+    if "storage_provider" in payload and payload["storage_provider"]:
+        settings.STORAGE_PROVIDER = payload["storage_provider"]
+    return {
+        "status": "success",
+        "message": "System settings updated successfully."
+    }
 
 # ------------------------------------------------------------------------------
 # Overview Dashboard Metrics
