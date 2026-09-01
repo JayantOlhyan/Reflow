@@ -1,160 +1,169 @@
-<div align="center">
-  <h1>Reflow</h1>
-  <p><strong>Create once. Transform everywhere.</strong></p>
-  <p>An open-source, self-hosted content operating system for creators and developers.</p>
-</div>
+# Reflow — Content Operating System
+
+> **"Create once. Transform everywhere."**
+
+Reflow is an open-source, self-hosted content operating system for creators and developers. It converts raw videos, text, and documents into vertical short-form video clips with animated burn-in captions, multi-slide carousels (PNG/PDF), blog copy, and scheduled multi-platform social publications.
 
 ---
 
-## ⚡ Overview
+## Features
 
-**Reflow** is a self-hosted content operating system designed to take single canonical assets—videos, carousels, images, PDFs, or text—and transform them into platform-tailored native formats for **Instagram, YouTube, TikTok, LinkedIn, X (Twitter), Facebook, and Threads**.
-
-### 🌟 Core Philosophy
-- **Self-Hosting First**: Your content, credentials, and database remain 100% on your own infrastructure.
-- **Intelligent Clip Engine**: Automated short-form moment discovery from long-form video, transcript boundary snapping, multi-factor quality ranking (50–100), frame-accurate FFmpeg sub-clipping, and standard aspect ratio transcoding (`9:16`, `1:1`, `4:5`, `16:9`).
-- **Carousel & Content Creation Engine**: Structured multi-slide carousel creation, AI planning from source content or `ContentBrief`, 4 deterministic design templates, server-side 1080x1080 PNG rasterization, and multi-page PDF export.
-- **AI Content Intelligence**: Provider-independent AI engine (OpenAI & Gemini) with audio extraction, timestamped transcription, reusable `ContentBrief` synthesis, and platform-native generation.
-- **Asynchronous Media Engine**: Redis-backed background worker generates real aspect ratio variants (`16:9`, `9:16`, `1:1`, `4:5`) and thumbnails using FFmpeg/FFprobe.
-- **Real Content Pipeline**: Multi-layer validated ingestion, collision-free storage, and transactional persistence.
-- **BYOK (Bring Your Own Key)**: Zero markup on AI models (Google Gemini & OpenAI).
-
----
-
-## 🚦 Implementation Status
-
-| Component | Status | Details |
-| :--- | :--- | :--- |
-| **Content Distribution & Automation** | ✅ Implemented (Phase 13) | Internal event bus routing triggers (`content.ready`, `clip.ready`, etc.), condition evaluation parsing, idempotent execution keying, daily publishing caps & cooldown limiters, connection health validations, custom action flows (discover clips, plan carousels, publish variant), partial failure isolation retries, human-in-the-loop approval scopes, pre-packaged automation templates, and interactive visual rule builder dashboard `/automations`. |
-| **Content Intelligence & Recommendations** | ✅ Implemented (Phase 11) | Evidence-first pattern detection, hook classification (8 archetypes), topic clustering, duration bucketing, localized posting window discovery, trimmed median baselines with outlier resistance, anti-hallucination claim validation, content gap discovery, replication opportunity recommendations, structured experiment tracking, async Redis worker analysis (`INTELLIGENCE_ANALYSIS`), and interactive `/intelligence` dashboard. |
-| **Analytics & Performance Intelligence** | ✅ Implemented (Phase 10) | Multi-platform metric extraction (YouTube, Instagram, LinkedIn, X, Facebook), immutable time-series `PostMetricSnapshot` records, strict NULL semantics, zero-division protected engagement rates, hourly growth velocities ($\Delta \text{views/hr}$), background Redis worker sync (`ANALYTICS_SYNC`), periodic scheduler sweeps, interactive analytics dashboard with period comparison KPIs, timeseries charts, platform breakdown matrix, top content attribution leaderboard, and single-publication drilldown drawer with manual sync cooldown. |
-| **Scheduling & Content Calendar Engine** | ✅ Implemented (Phase 9) | Server-side background scheduler daemon (`scheduler.py`) with atomic PostgreSQL lease claiming (`(status, scheduled_at)` composite index), IANA timezone resolution (`zoneinfo`), DST transition handling, minimum lead-time validation, crash/stale lease recovery, missed-schedule execution, content deletion guardrails, full Month/Week/Day calendar UI (`/calendar`), and rescheduling & cancellation lifecycle. |
-| **Multi-Platform Publishing Engine** | ✅ Implemented (Phase 8) | Universal connector architecture covering YouTube, Instagram (Reels, photos, carousels), LinkedIn (text, video UGC posts), X (API v2 tweets), Facebook Pages, TikTok, Pinterest, and Threads with AES-256 encrypted tokens at rest, multi-destination batch publishing (`/api/publications/batch`), independent failure isolation, SHA-256 idempotency, and Repurpose Studio multi-platform publishing modal. |
-| **Captions & Subtitle Polish** | ✅ Implemented (Phase 6) | Short-form transcript cue alignment, 1–4 word punchy beat chunking, styling presets (`BOLD_PUNCH`, `CLEAN_SUBTITLE`, `KINETIC_HIGHLIGHT`, `MINIMAL_WHITE`), keyword highlight formatting, safe-area margin calculation for Reels/TikTok/Shorts, FFmpeg burned captions, clean clip preservation, live synchronized player overlay, and SRT/VTT exports. |
-| **Intelligent Clip Engine** | ✅ Implemented (Phase 5) | Relational `Clip` & `ClipVariant` models, transcript boundary snapping ($\pm 3.5\text{s}$), non-maximum overlap suppression, 50–100 quality scoring, frame-accurate FFmpeg extraction (`-avoid_negative_ts make_zero`), `9:16` / `1:1` / `4:5` / `16:9` variants, centered thumbnail extraction, and Repurpose Studio timeline fine-tuning. |
-| **Carousel & Content Creation** | ✅ Implemented (Phase 4) | Relational `Carousel`, `CarouselSlide`, `SlideElement`, `CarouselExport` tables, AI planner, design templates (`MINIMAL`, `EDITORIAL`, `BOLD`, `EDUCATIONAL`), 1080x1080 PNG & multi-page PDF renderer, slide reordering, versioning, and Carousel Studio UI. |
-| **AI Content Intelligence** | ✅ Implemented (Phase 3) | Audio extraction, timestamped transcription, `ContentBrief` extraction, platform-specific copies (LinkedIn, Instagram, X threads, YouTube chapters), prompt versioning, and validation. |
-| **Real Media Engine** | ✅ Implemented (Phase 2) | Asynchronous Redis worker, real FFprobe metadata extraction, FFmpeg variant generation (9:16, 1:1, 4:5, 16:9, Thumbnail), atomic persistence, and streaming. |
-| **Real Content Ingestion** | ✅ Implemented (Phase 1) | Real multipart upload for Video (`.mp4`, `.mov`, `.webm`, `.mkv`), Image (`.png`, `.jpg`, `.webp`), PDF (`.pdf`), and Text (`.txt`, `.md`, inline notes). |
-| **Storage & Persistence** | ✅ Implemented (Phase 1) | `BaseStorageService` / `LocalStorageService` with path traversal defense, collision-safe keys (`content/{id}/original/{asset_id}.ext`), and orphan rollback. |
-| **Content Library & Previews** | ✅ Implemented (Phase 1–11) | Real Content 1 $\rightarrow$ N Asset $\rightarrow$ N Variant $\rightarrow$ N AI Outputs $\rightarrow$ N Carousels $\rightarrow$ N Clips & Captioned Variants $\rightarrow$ N Publications $\rightarrow$ N Scheduled Calendar Events $\rightarrow$ N Metric Snapshots $\rightarrow$ N Insights & Recommendations, live processing polling, and Repurpose Studio. |
-| **Database & Models** | ✅ Implemented (Phase 0–11) | SQLAlchemy async engine (SQLite dev / PostgreSQL prod), relational tables with foreign-key cascade deletion. |
-| **Health Telemetry** | ✅ Implemented (Phase 0, 9, 10 & 11) | Active component checks for Database, Storage, FFmpeg, Redis, AI keys, Scheduler daemon heartbeat, Analytics sync engine, and Content Intelligence engine. |
-| **Workflow Engine** | 🟡 Visual Prototype | Interactive node graph simulator; DAG execution engine scheduled for future milestone. |
+- **Automated Video Repurposing**: Ingest long-form videos and automatically generate aspect-ratio variants (`9:16`, `1:1`, `4:5`, `16:9`), speech-to-text transcripts, and structured content briefs.
+- **Intelligent Short-Form Clip Engine**: AI moment discovery with transcript boundary snapping, quality scoring, sub-clipping, and aspect-ratio transcoding.
+- **Dynamic Captions & Subtitles**: Word-level highlight burn-in captions with safe-area layouts for TikTok, Instagram Reels, and YouTube Shorts.
+- **Server-Side Carousel Studio**: Interactive 1080x1080 slide deck planner with rasterization to PNG slide images and multi-page PDF documents.
+- **Multi-Platform Publishing Engine**: Direct integration with YouTube, Instagram, LinkedIn, X (Twitter), Facebook Pages, TikTok, Pinterest, and Threads with symmetric token encryption (`ENCRYPTION_SECRET`).
+- **UTC Scheduler & Content Calendar**: Independent UTC scheduler daemon with atomic publication claiming and stale-claim recovery.
+- **Content Governance & Quality Control**: Centralized policy engine checking video resolution, brand forbidden terms, duplicate publication windows, and factual claim traceability.
+- **Closed-Loop Automation Engine**: Lifecycle event triggers (`content.ready`, `clip.ready`) executing custom automation pipelines with rate limits and human-in-the-loop approval gates.
+- **Self-Hosted Infrastructure Telemetry**: First-run setup checklist (`/setup`), real CPU/Memory/Disk metrics (`psutil`), non-destructive database backup/restore scripts (`scripts/backup.sh`, `scripts/restore.sh`), and zero fake mock data.
 
 ---
 
-## 🏗️ Architecture
+## Architecture Overview
+
+Reflow consists of 6 containerized microservices operating over shared persistence layers:
 
 ```
-                                       REFLOW
-                                          │
-               ┌──────────────────────────┼──────────────────────────┐
-               │                          │                          │
-            CONTENT                       AI                      CAROUSEL
-               │                          │                          │
-            Original                      │                          │
-               │                          │                          │
-            FFprobe                       │                          │
-               │                          │                          │
-            FFmpeg                        │                          │
-               │                          │                          │
-         ┌─────┴─────┐                    │                          │
-         │           │                    │                          │
-      Variants     Audio                  │                          │
-                     │                    │                          │
-                     ▼                    │                          │
-                Transcript ───────────────┤                          │
-                     │                    │                          │
-                     ▼                    │                          │
-               ContentBrief ──────────────┼──────────────────────────┤
-                     │                    │                          │
-          ┌──────────┼───────────┐        │                          ▼
-          ▼          ▼           ▼        │                   Carousel Planner
-      LinkedIn   Instagram       X        │                          │
-          │          │           │        │                          ▼
-          └──────────┼───────────┘        │                   Structured Slides
-                     │                    │                          │
-                  YouTube                 ▼                          ▼
-                     │             AI CLIP ENGINE              Design System
-                     ▼                    │                          │
-             REPURPOSE STUDIO             ▼                          ▼
-                     │             Frame-accurate                Renderer
-                     │             FFmpeg Extracts                   │
-                     │                    │                          ▼
-                     ▼                    ▼                   PNG / PDF EXPORTS
-              SHORT-FORM CLIPS    9:16 / 1:1 / 4:5 / 16:9
+                        ┌────────────────────────┐
+                        │     Browser Client     │
+                        └───────────┬────────────┘
+                                    │ HTTP :3000
+                                    ▼
+                        ┌────────────────────────┐
+                        │   Web (Next.js 16)     │
+                        └───────────┬────────────┘
+                                    │ API / REST :8000
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                          API (FastAPI)                                 │
+│ - REST Endpoints (/api/v1)        - Input Validation & Rate Limiting  │
+│ - Secret Encryption/Decryption   - SSRF Protection & Safe FFmpeg      │
+└────────────┬──────────────────────┬──────────────────────┬─────────────┘
+             │                      │                      │
+             ▼                      ▼                      ▼
+    ┌────────────────┐     ┌────────────────┐    ┌───────────────────┐
+    │   PostgreSQL   │     │     Redis      │    │  Storage Volume   │
+    │   (Port 5432)  │     │   (Port 6379)  │    │ (/app/storage)    │
+    └────────┬───────┘     └────────┬───────┘    └─────────┬─────────┘
+             │                      │                      │
+             ├──────────────────────┼──────────────────────┤
+             │                      │                      │
+             ▼                      ▼                      ▼
+┌────────────────────────┐┌──────────────────┐┌──────────────────────┐
+│        Worker          ││    Scheduler     ││    FFmpeg Binary     │
+│ (Background Queue)     ││ (Cron Daemon)    ││ (Transcoder Engine)  │
+└────────────────────────┘└──────────────────┘└──────────────────────┘
 ```
+
+For complete technical specifications, review [`docs/ARCHITECTURE.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/docs/ARCHITECTURE.md).
 
 ---
 
-## 🚀 Quickstart (Self-Hosting with Docker)
+## System Requirements
+
+- **Docker**: Docker 24.0+ and Docker Compose v2.0+
+- **Host OS**: Linux, macOS, or Windows (via WSL2)
+- **Minimum Resources**: 2 CPU cores, 4GB RAM, 20GB free disk storage
+- **FFmpeg**: Included in Docker images (or system FFmpeg 5.0+ for bare-metal setup)
+
+---
+
+## Quick Start ("Clone → Configure → Run")
+
+Reflow becomes fully operational with a single `docker compose up -d` command without running manual database commands or build scripts.
 
 ```bash
-# 1. Clone the repository
+# 1. Clone repository
 git clone https://github.com/JayantOlhyan/Reflow.git
 cd Reflow
 
-# 2. Copy environment template and configure BYOK AI keys
+# 2. Copy environment template
 cp .env.example .env
 
-# 3. Start Reflow with Docker Compose (web, api, worker, postgres, redis)
+# 3. Start all services via Docker Compose
 docker compose up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+### Accessing Reflow
+- **Web App**: [http://localhost:3000](http://localhost:3000)
+- **First-Run Setup Checklist**: [http://localhost:3000/setup](http://localhost:3000/setup)
+- **Backend API Health**: [http://localhost:8000/health](http://localhost:8000/health)
+- **Interactive OpenAPI Specification**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
-## 🛠️ Local Development
+## Environment Configuration
 
-### Prerequisites
-- Node.js >= 18
-- Python >= 3.9
-- FFmpeg & FFprobe
+Reflow environment variables are defined in `.env`:
 
-### Running the Frontend
-```bash
-cd apps/web
-npm install
-npm run dev
-# Running on http://localhost:3000
+| Variable | Default | Purpose |
+|---|---|---|
+| `ENVIRONMENT` | `development` | `development` or `production` mode |
+| `DEPLOYMENT_MODE` | `single_user` | `single_user` security scope |
+| `DATABASE_URL` | `postgresql+asyncpg://...` | Database connection URL |
+| `REDIS_URL` | `redis://redis:6379/0` | Redis queue connection URL |
+| `STORAGE_PROVIDER` | `local` | Media storage engine (`local`) |
+| `STORAGE_DIR` | `/app/storage` | Persistent media directory |
+| `ENCRYPTION_SECRET` | 32+ char secret | AES-256 Fernet OAuth encryption key |
+| `GEMINI_API_KEY` | *(Optional)* | Google Gemini API Key |
+| `OPENAI_API_KEY` | *(Optional)* | OpenAI API Key |
+
+For detailed variable documentation, review [`.env.example`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/.env.example).
+
+---
+
+## AI Provider & Platform Setup
+
+### 1. AI Setup (Bring Your Own Key)
+Configure Google Gemini or OpenAI keys via the web interface under `/settings` or in `.env`:
+```env
+GEMINI_API_KEY=AIzaSy...
+OPENAI_API_KEY=sk-proj-...
 ```
 
-### Running the Backend API
+### 2. Platform Connections
+Configure platform credentials under `/connections` to enable multi-channel publishing to YouTube, Instagram, X (Twitter), LinkedIn, Meta, TikTok, Pinterest, and Threads.
+
+---
+
+## Backup & Restore
+
+### Database & Media Backup
 ```bash
-cd apps/api
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-# Running on http://localhost:8000
+./scripts/backup.sh
+```
+Creates timestamped database dumps and media storage archives under `./storage/backups/`.
+
+### Database & Media Restore
+```bash
+./scripts/restore.sh ./storage/backups/reflow_db_YYYYMMDD_HHMMSS.sql ./storage/backups/reflow_media_YYYYMMDD_HHMMSS.tar.gz
 ```
 
-### Running the Media & AI Worker
+### Safe Storage Cleanup
 ```bash
-cd apps/api
-source venv/bin/activate
-python worker.py
+./scripts/cleanup.sh
 ```
 
 ---
 
-## 🧪 Testing
+## Documentation
 
-```bash
-# Run all backend tests (API pipeline, media engine, AI engine, carousel engine, persistence)
-apps/api/venv/bin/python3 apps/api/test_api.py
-apps/api/venv/bin/python3 apps/api/test_media_engine.py
-apps/api/venv/bin/python3 apps/api/test_ai_engine.py
-apps/api/venv/bin/python3 apps/api/test_carousel_engine.py
-apps/api/venv/bin/python3 apps/api/test_persistence.py
-
-# Run frontend build verification
-cd apps/web && npm run build
-```
+- **Deployment Guide**: [`docs/DEPLOYMENT.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/docs/DEPLOYMENT.md)
+- **Architecture Specification**: [`docs/ARCHITECTURE.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/docs/ARCHITECTURE.md)
+- **Security Policy**: [`SECURITY.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/SECURITY.md)
+- **Contributing Guide**: [`CONTRIBUTING.md`](file:///Users/jayantolhyan/Desktop/my%20projects/open%20source%20/Reflow/CONTRIBUTING.md)
 
 ---
 
-## 📄 License
-Reflow is released under the **MIT License**.
+## Security & Limitations
+
+- **Single-User Scope**: Reflow operates under single-user ownership assumptions. Ensure your server firewall isolates port 8000/3000 to trusted networks.
+- **SSRF Defense**: Server-side URL fetching strictly blocks private IP ranges and internal container hostnames.
+- **Upload Hardening**: File extensions, MIME types, and file sizes are strictly validated.
+
+---
+
+## License
+
+Reflow is open-source software licensed under the MIT License.
