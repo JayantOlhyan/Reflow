@@ -157,3 +157,12 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 - **Upload Hardening**: Path traversal protection (`os.path.basename`), MIME/extension whitelist, and `MAX_UPLOAD_SIZE_MB` size limit enforcement.
 - **Command Safety**: All FFmpeg/FFprobe invocations execute via list-based `asyncio.create_subprocess_exec` without shell string interpolation.
 
+### 2.15 Performance, Scalability & Resource Management (Phase 21)
+- **Domain Concurrency Semaphores**: Domain-isolated worker slot limits (`MEDIA_WORKER_CONCURRENCY=2`, `AI_WORKER_CONCURRENCY=3`, `PUBLISH_WORKER_CONCURRENCY=5`, `WEBHOOK_WORKER_CONCURRENCY=5`).
+- **Priority Queue Channels**: 4-level priority queuing (`CRITICAL`, `HIGH`, `NORMAL`, `LOW`) ensuring time-sensitive publishing and webhooks run ahead of background video transcoding.
+- **Queue Backpressure**: Saturation checks returning `429 Too Many Requests` or `503 Service Unavailable` when `MAX_QUEUE_DEPTH` (100) is exceeded.
+- **FFmpeg & Process Bounds**: CPU thread limit (`-threads 2`) and process execution timeouts (`asyncio.wait_for(..., timeout=300)`).
+- **Managed Temporary Storage**: Managed temporary directory (`storage/tmp/`), DB-backed `TmpFileRecord` tracking, pre-flight disk capacity reservation, and scheduled expiration purges (`POST /api/system/storage/cleanup`).
+- **AI Deduplication**: Deterministic SHA-256 prompt hashing and installation-scoped response caching.
+
+
