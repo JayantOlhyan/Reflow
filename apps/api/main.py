@@ -22,9 +22,10 @@ from models.entities import (
     ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
     Clip, ClipVariant, PlatformConnection, Publication, Workflow, Job, SystemLog,
     PerformanceInsight, ContentPattern, ContentRecommendation, Experiment, ExperimentVariant, ExperimentResult,
-    AutomationRule, AutomationExecution, AutomationActionExecution
+    AutomationRule, AutomationExecution, AutomationActionExecution, Notification
 )
 from models.schemas import (
+    NotificationResponse, NotificationListResponse, GlobalSearchResultItem, GlobalSearchResponse,
     ContentResponse, ContentListResponse, TextContentCreateRequest,
     TranscriptResponse, ContentBriefResponse, GeneratedContentResponse,
     AIGenerateRequest, RepurposeRequest, AICarouselPrompt, SchedulePostRequest,
@@ -2921,6 +2922,207 @@ async def create_rule_from_template(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# ============================================================================
+# PHASE 16: NOTIFICATIONS, SEARCH & PRODUCTIZATION ENDPOINTS
+# ============================================================================
+
+@app.get("/api/notifications", response_model=NotificationListResponse, tags=["Notifications"])
+async def get_notifications(
+    limit: int = Query(50, ge=1, le=200),
+    unread_only: bool = Query(False),
+):
+    """Fetches recent persistent system notifications and unread count."""
+    from services.notification_service import notification_service
+    res = await notification_service.get_notifications(limit=limit, unread_only=unread_only)
+    return NotificationListResponse(items=res["items"], unread_count=res["unread_count"])
+
+@app.post("/api/notifications/{notification_id}/read", tags=["Notifications"])
+async def mark_notification_read(notification_id: str):
+    """Marks a single notification as read."""
+    from services.notification_service import notification_service
+    success = await notification_service.mark_read(notification_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    return {"status": "success", "message": f"Notification {notification_id} marked as read."}
+
+@app.post("/api/notifications/read-all", tags=["Notifications"])
+async def mark_all_notifications_read():
+    """Marks all notifications as read."""
+    from services.notification_service import notification_service
+    count = await notification_service.mark_all_read()
+    return {"status": "success", "marked_read_count": count}
+
+@app.get("/api/search", response_model=GlobalSearchResponse, tags=["Search"])
+async def global_search(
+    q: str = Query(..., min_length=1, description="Search query string"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Performs server-side search across Content, Clips, Carousels, Publications, Experiments, Automations."""
+    query_str = f"%{q.strip()}%"
+    results = []
+
+    # 1. Search Content
+    c_res = await db.execute(
+        select(Content).where(or_(Content.title.ilike(query_str), Content.text_content.ilike(query_str))).limit(10)
+    )
+    for c in c_res.scalars().all():
+        results.append(GlobalSearchResultItem(
+            id=c.id,
+            type="content",
+            title=c.title,
+            subtitle=f"{c.content_type} • {c.status}",
+            url=f"/content/{c.id}",
+            status=c.status,
+            created_at=c.created_at
+        ))
+
+    # 2. Search Clips
+    clip_res = await db.execute(
+        select(Clip).where(or_(Clip.title.ilike(query_str), Clip.hook.ilike(query_str))).limit(10)
+    )
+    for cl in clip_res.scalars().all():
+        results.append(GlobalSearchResultItem(
+            id=cl.id,
+            type="clip",
+            title=cl.title or "Untitled Clip",
+            subtitle=f"Clip ({cl.duration_seconds}s) • {cl.status}",
+            url=f"/content/{cl.content_id}?tab=clips",
+            status=cl.status,
+            created_at=cl.created_at
+        ))
+
+    # 3. Search Carousels
+    car_res = await db.execute(
+        select(Carousel).where(Carousel.title.ilike(query_str)).limit(10)
+    )
+    for car in car_res.scalars().all():
+        results.append(GlobalSearchResultItem(
+            id=car.id,
+            type="carousel",
+            title=car.title or "Untitled Carousel",
+            subtitle=f"Carousel ({car.slide_count} slides) • {car.status}",
+            url=f"/content/{car.content_id}?tab=carousels",
+            status=car.status,
+            created_at=car.created_at
+        ))
+
+    # 4. Search Publications
+    pub_res = await db.execute(
+        select(Publication).where(or_(Publication.title.ilike(query_str), Publication.description.ilike(query_str))).limit(10)
+    )
+    for p in pub_res.scalars().all():
+        results.append(GlobalSearchResultItem(
+            id=p.id,
+            type="publication",
+            title=p.title or f"{p.platform.upper()} Publication",
+            subtitle=f"{p.platform.upper()} • {p.status}",
+            url=f"/publishing?id={p.id}",
+            status=p.status,
+            created_at=p.created_at
+        ))
+
+    # 5. Search Experiments
+    exp_res = await db.execute(
+        select(Experiment).where(or_(Experiment.name.ilike(query_str), Experiment.hypothesis.ilike(query_str))).limit(10)
+    )
+    for e in exp_res.scalars().all():
+        results.append(GlobalSearchResultItem(
+            id=e.id,
+            type="experiment",
+            title=e.name,
+            subtitle=f"Experiment • {e.status}",
+            url=f"/experiments?id={e.id}",
+            status=e.status,
+            created_at=e.created_at
+        ))
+
+    # 6. Search Automations
+    aut_res = await db.execute(
+        select(AutomationRule).where(or_(AutomationRule.name.ilike(query_str), AutomationRule.trigger_type.ilike(query_str))).limit(10)
+    )
+    for a in aut_res.scalars().all():
+        results.append(GlobalSearchResultItem(
+            id=a.id,
+            type="automation",
+            title=a.name,
+            subtitle=f"Automation ({a.trigger_type})",
+            url=f"/automations?id={a.id}",
+            status="ACTIVE" if a.is_active else "INACTIVE",
+            created_at=a.created_at
+        ))
+
+    return GlobalSearchResponse(query=q, results=results)
+
+@app.post("/api/publications/{publication_id}/approve", response_model=PublicationResponse, tags=["Publications"])
+async def approve_publication(publication_id: str, db: AsyncSession = Depends(get_db)):
+    """Approves a publication awaiting approval and transitions it to SCHEDULED or QUEUED."""
+    res = await db.execute(select(Publication).where(Publication.id == publication_id))
+    pub = res.scalar_one_or_none()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publication not found.")
+    
+    if pub.status in ["PUBLISHED", "PUBLISHING"]:
+        raise HTTPException(status_code=400, detail=f"Cannot approve publication in {pub.status} status.")
+
+    pub.status = "SCHEDULED" if pub.scheduled_at else "DRAFT"
+    pub.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(pub)
+
+    from services.notification_service import notification_service
+    await notification_service.create_notification(
+        notification_type="APPROVAL_SUCCESS",
+        title="Publication Approved",
+        message=f"Publication '{pub.title or pub.id}' was approved for {pub.platform.upper()}.",
+        severity="SUCCESS",
+        entity_type="publication",
+        entity_id=pub.id
+    )
+
+    return PublicationResponse.model_validate(pub)
+
+@app.post("/api/publications/approve-batch", tags=["Publications"])
+async def approve_batch_publications(publication_ids: List[str], db: AsyncSession = Depends(get_db)):
+    """Bulk approves multiple publications, skipping any in BLOCKED or FAILED state."""
+    approved_count = 0
+    skipped_count = 0
+
+    for pub_id in publication_ids:
+        res = await db.execute(select(Publication).where(Publication.id == pub_id))
+        pub = res.scalar_one_or_none()
+        if pub and pub.status not in ["FAILED", "PUBLISHED", "PUBLISHING"]:
+            pub.status = "SCHEDULED" if pub.scheduled_at else "DRAFT"
+            pub.updated_at = datetime.utcnow()
+            approved_count += 1
+        else:
+            skipped_count += 1
+
+    await db.commit()
+    return {"status": "success", "approved_count": approved_count, "skipped_count": skipped_count}
+
+@app.get("/api/clips/{clip_id}", response_model=ClipResponse, tags=["Clips"])
+async def get_clip_detail(clip_id: str, db: AsyncSession = Depends(get_db)):
+    """Fetches details for a single clip."""
+    res = await db.execute(
+        select(Clip).options(selectinload(Clip.variants)).where(Clip.id == clip_id)
+    )
+    clip = res.scalar_one_or_none()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+    return ClipResponse.model_validate(clip)
+
+@app.get("/api/carousels/{carousel_id}", response_model=CarouselResponse, tags=["Carousels"])
+async def get_carousel_detail(carousel_id: str, db: AsyncSession = Depends(get_db)):
+    """Fetches details for a single carousel."""
+    res = await db.execute(
+        select(Carousel).options(selectinload(Carousel.slides).selectinload(CarouselSlide.elements)).where(Carousel.id == carousel_id)
+    )
+    car = res.scalar_one_or_none()
+    if not car:
+        raise HTTPException(status_code=404, detail="Carousel not found.")
+    return CarouselResponse.model_validate(car)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+
