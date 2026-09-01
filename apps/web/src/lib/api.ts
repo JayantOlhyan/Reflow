@@ -981,6 +981,67 @@ class ApiClient {
   async getEcosystemMetrics(): Promise<any> {
     return this.request<any>('/api/ecosystem/metrics');
   }
+
+  // Phase 19: Observability, Reliability & Incident Engine
+  async getIncidents(params?: { status?: string; severity?: string; component?: string }): Promise<import('@/types').SystemIncidentItem[]> {
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    if (params?.severity) query.set('severity', params.severity);
+    if (params?.component) query.set('component', params.component);
+    return this.request<import('@/types').SystemIncidentItem[]>(`/api/system/incidents?${query.toString()}`);
+  }
+
+  async getIncidentDetail(incidentId: string): Promise<import('@/types').SystemIncidentItem> {
+    return this.request<import('@/types').SystemIncidentItem>(`/api/system/incidents/${incidentId}`);
+  }
+
+  async acknowledgeIncident(incidentId: string, acknowledgedBy: string = 'Operator'): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/api/system/incidents/${incidentId}/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged_by: acknowledgedBy })
+    });
+  }
+
+  async resolveIncident(incidentId: string, resolutionNote: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/api/system/incidents/${incidentId}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resolution_note: resolutionNote })
+    });
+  }
+
+  async getFailedJobs(): Promise<import('@/types').DeadLetterJobItem[]> {
+    return this.request<import('@/types').DeadLetterJobItem[]>('/api/system/jobs/failed');
+  }
+
+  async retryFailedJob(jobId: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/api/system/jobs/${jobId}/retry`, {
+      method: 'POST'
+    });
+  }
+
+  async traceRequest(requestId: string): Promise<import('@/types').TraceViewData> {
+    return this.request<import('@/types').TraceViewData>(`/api/system/trace/request/${requestId}`);
+  }
+
+  async traceJob(jobId: string): Promise<import('@/types').TraceViewData> {
+    return this.request<import('@/types').TraceViewData>(`/api/system/trace/job/${jobId}`);
+  }
+
+  async traceContent(contentId: string): Promise<import('@/types').TraceViewData> {
+    return this.request<import('@/types').TraceViewData>(`/api/system/trace/content/${contentId}`);
+  }
+
+  async getSystemTelemetryMetrics(): Promise<any> {
+    return this.request<any>('/api/system/telemetry/metrics');
+  }
+
+  async setSystemMaintenanceMode(enabled: boolean): Promise<{ status: string; maintenance_mode: boolean }> {
+    return this.request<{ status: string; maintenance_mode: boolean }>(`/api/system/maintenance?enabled=${enabled}`, {
+      method: 'POST'
+    });
+  }
 }
 
 export const api = new ApiClient(API_BASE);
