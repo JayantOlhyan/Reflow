@@ -295,6 +295,36 @@ async def process_single_job(payload: dict) -> bool:
                 job.error = None
                 await session.commit()
 
+        # Create persistent notification for key jobs
+        from services.notification_service import notification_service
+        if job_type in ["MEDIA_PROCESSING", "CONTENT_GENERATION"]:
+            await notification_service.create_notification(
+                notification_type="PROCESSING_COMPLETE",
+                title="Processing Complete",
+                message=f"Content processing & AI generation completed for ID {content_id}.",
+                severity="SUCCESS",
+                entity_type="content",
+                entity_id=content_id
+            )
+        elif job_type in ["CAROUSEL_GENERATION", "CAROUSEL_RENDER"]:
+            await notification_service.create_notification(
+                notification_type="PROCESSING_COMPLETE",
+                title="Carousel Ready",
+                message=f"Carousel deck rendered successfully.",
+                severity="SUCCESS",
+                entity_type="carousel",
+                entity_id=carousel_id
+            )
+        elif job_type in ["CLIP_DISCOVERY", "CLIP_RENDER"]:
+            await notification_service.create_notification(
+                notification_type="PROCESSING_COMPLETE",
+                title="Clip Rendered",
+                message=f"Intelligent video clip rendered successfully.",
+                severity="SUCCESS",
+                entity_type="clip",
+                entity_id=clip_id
+            )
+
         logger.info(f"Job {job_id} ({job_type}) completed successfully.")
         return True
 
