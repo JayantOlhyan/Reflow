@@ -900,3 +900,44 @@ class Notification(Base):
     entity_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+
+class PluginConfiguration(Base):
+    __tablename__ = "plugin_configurations"
+
+    id = Column(String(64), primary_key=True, index=True)
+    plugin_id = Column(String(128), nullable=False, unique=True, index=True)
+    enabled = Column(Boolean, default=True, index=True)
+    configuration_json = Column(Text, default="{}")
+    health_status = Column(String(32), default="HEALTHY", index=True)
+    permissions_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+
+    id = Column(String(64), primary_key=True, index=True)
+    url = Column(String(512), nullable=False)
+    events_json = Column(Text, default="[]") # List of subscribed event strings
+    enabled = Column(Boolean, default=True, index=True)
+    secret = Column(String(128), nullable=False) # HMAC signing secret
+    last_success_at = Column(DateTime, nullable=True)
+    last_failure_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class APIKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    prefix = Column(String(16), nullable=False, index=True) # e.g. reflow_live_
+    hashed_key = Column(String(255), nullable=False, unique=True, index=True)
+    permissions_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+
+
