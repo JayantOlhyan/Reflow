@@ -82,12 +82,18 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Reflow API shutting down.")
 
+from fastapi.middleware.gzip import GZipMiddleware
+from routers.performance import router as performance_router
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="Open-source self-hosted content operating system",
     lifespan=lifespan
 )
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.include_router(performance_router, prefix="/api")
 
 # CORS configuration
 app.add_middleware(
@@ -171,6 +177,34 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "error": "VALIDATION_ERROR",
             "message": "Invalid request payload.",
             "details": clean_errors,
+            "request_id": req_id
+        },
+        headers={"X-Request-ID": req_id}
+    )
+
+from services.resource_manager import QueueOverflowError, InsufficientDiskError
+
+@app.exception_handler(QueueOverflowError)
+async def queue_overflow_handler(request: Request, exc: QueueOverflowError):
+    req_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "error": "QUEUE_OVERFLOW",
+            "message": str(exc),
+            "request_id": req_id
+        },
+        headers={"X-Request-ID": req_id, "Retry-After": "30"}
+    )
+
+@app.exception_handler(InsufficientDiskError)
+async def disk_error_handler(request: Request, exc: InsufficientDiskError):
+    req_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "error": "INSUFFICIENT_DISK_SPACE",
+            "message": str(exc),
             "request_id": req_id
         },
         headers={"X-Request-ID": req_id}
