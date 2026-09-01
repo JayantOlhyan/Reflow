@@ -106,9 +106,8 @@ _rate_limit_store = defaultdict(list)
 # Request ID, Rate Limiting & /api/v1 Path Aliasing Middleware
 @app.middleware("http")
 async def request_tracing_and_rate_limit_middleware(request: Request, call_next):
-    # Support /api/v1 URL prefix seamlessly
-    if request.url.path.startswith("/api/v1/"):
-        request.scope["path"] = request.url.path.replace("/api/v1/", "/api/", 1)
+    if request.url.path.startswith("/api/v1/system"):
+        request.scope["path"] = request.url.path.replace("/api/v1/system", "/api/system", 1)
 
     req_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4().hex[:12]}"
     request.state.request_id = req_id
@@ -158,12 +157,20 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     req_id = getattr(request.state, "request_id", "unknown")
+    clean_errors = []
+    for err in exc.errors():
+        err_copy = dict(err)
+        if "input" in err_copy and isinstance(err_copy["input"], bytes):
+            err_copy["input"] = "[binary_data]"
+        if "ctx" in err_copy and isinstance(err_copy["ctx"], dict):
+            err_copy["ctx"] = {k: str(v) if isinstance(v, bytes) else v for k, v in err_copy["ctx"].items()}
+        clean_errors.append(err_copy)
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "error": "VALIDATION_ERROR",
             "message": "Invalid request payload.",
-            "details": exc.errors(),
+            "details": clean_errors,
             "request_id": req_id
         },
         headers={"X-Request-ID": req_id}
@@ -3554,9 +3561,45 @@ async def set_system_maintenance_mode(enabled: bool = Query(..., description="En
     incident_service.set_maintenance_mode(enabled)
     return {"status": "success", "maintenance_mode": incident_service.is_maintenance_mode()}
 
+from fastapi import APIRouter
+
+from routers.v1 import (
+    discovery as v1_discovery,
+    content as v1_content,
+    clips as v1_clips,
+    carousels as v1_carousels,
+    copy as v1_copy,
+    governance as v1_governance,
+    publications as v1_publications,
+    schedules as v1_schedules,
+    analytics as v1_analytics,
+    experiments as v1_experiments,
+    automations as v1_automations,
+    jobs as v1_jobs,
+    webhooks as v1_webhooks
+)
+
+v1_router = APIRouter(prefix="/api/v1")
+v1_router.include_router(v1_discovery.router)
+v1_router.include_router(v1_content.router)
+v1_router.include_router(v1_clips.router)
+v1_router.include_router(v1_carousels.router)
+v1_router.include_router(v1_copy.router)
+v1_router.include_router(v1_governance.router)
+v1_router.include_router(v1_publications.router)
+v1_router.include_router(v1_schedules.router)
+v1_router.include_router(v1_analytics.router)
+v1_router.include_router(v1_experiments.router)
+v1_router.include_router(v1_automations.router)
+v1_router.include_router(v1_jobs.router)
+v1_router.include_router(v1_webhooks.router)
+
+app.include_router(v1_router)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+
 
 
 
