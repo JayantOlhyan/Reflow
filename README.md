@@ -8,6 +8,9 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 
 ## Features
 
+- **Open-Source Plugin Ecosystem (`/plugins`)**: Contract-driven plugin architecture (`PluginRegistry`) for custom social platforms, AI providers, storage drivers, media transcoders, and workflow actions with error isolation, permissions, and CLI generator (`python scripts/create-plugin.py`).
+- **Outbound Webhooks System (`/settings/webhooks`)**: Signed HTTP webhook delivery (HMAC-SHA256) with exponential backoff retries and recipient event deduplication.
+- **Public REST API & API Keys**: Scoped API key authorization with SHA-256 hashed storage, OpenAPI specs, and developer SDK (`packages/plugin-sdk/`).
 - **Unified Content Workspace (`/content/[id]`)**: Single 10-section hub for every content item linking lifecycle timeline, media player, interactive transcript with timestamp jumping, clips, carousels, platform copy, governance, and analytics.
 - **Centralized Approval Center (`/approvals`)**: Single and bulk publication approval with automated governance quality control safeguards.
 - **Publishing Workspace (`/publishing`)**: Tabbed status management (`Draft`, `Scheduled`, `Publishing`, `Published`, `Failed`), post payload inspection, and one-click retry.
