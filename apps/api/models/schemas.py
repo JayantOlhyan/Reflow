@@ -7,6 +7,12 @@ class ApiResponse(BaseModel):
     message: Optional[str] = None
     data: Optional[Any] = None
 
+class ContentCreateRequest(BaseModel):
+    title: str
+    raw_text: Optional[str] = None
+    type: Optional[str] = "TEXT"
+    source_url: Optional[str] = None
+
 class AssetResponse(BaseModel):
     id: str
     content_id: str
