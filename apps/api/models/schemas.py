@@ -1240,3 +1240,58 @@ class APIKeyResponse(BaseModel):
     expires_at: Optional[datetime] = None
 
 
+class EcosystemPluginItem(BaseModel):
+    id: str
+    name: str
+    version: str
+    description: str
+    author: str
+    repository: Optional[str] = None
+    homepage: Optional[str] = None
+    license: Optional[str] = None
+    plugin_type: str
+    api_version: str
+    reflow_version: str
+    capabilities: List[str] = []
+    permissions: List[str] = []
+    checksum: str
+    documentation: Optional[str] = None
+    source_type: str = "OFFICIAL"
+    changelog: Optional[str] = None
+    is_installed: bool = False
+    installed_version: Optional[str] = None
+    update_available: bool = False
+    latest_version: Optional[str] = None
+
+
+class EcosystemCatalogResponse(BaseModel):
+    plugins: List[EcosystemPluginItem]
+    total: int
+    registry_url: str
+    updated_at: str
+
+
+class PluginInstallRequest(BaseModel):
+    plugin_id: str
+    version: Optional[str] = None
+    source: Optional[str] = None
+    accept_permissions: bool = True
+
+
+class PluginUpdateRequest(BaseModel):
+    confirm: bool = True
+
+
+class PluginConfigureRequest(BaseModel):
+    config: Dict[str, Any]
+
+
+class PluginAuditLogItem(BaseModel):
+    id: str
+    plugin_id: str
+    action: str
+    details: Dict[str, Any] = {}
+    created_at: datetime
+
+
+
