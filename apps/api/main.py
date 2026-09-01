@@ -3453,8 +3453,110 @@ async def get_ecosystem_metrics():
     """Gets plugin ecosystem system health & operation metrics telemetry."""
     return ecosystem_service.metrics
 
+# ==============================================================================
+# PHASE 19: OBSERVABILITY, RELIABILITY & INCIDENT ENGINE REST API ENDPOINTS
+# ==============================================================================
+
+from services.incident_service import incident_service
+from services.telemetry_service import telemetry_service
+from models.entities import SystemJob, DeadLetterJob
+from models.schemas import (
+    SystemJobResponse, DeadLetterJobResponse, IncidentResponse,
+    IncidentAcknowledgeRequest, IncidentResolveRequest, IncidentEventResponse,
+    SystemEventResponse, AlertRuleResponse, AlertRuleCreateRequest,
+    HealthHistoryResponse, WorkerHeartbeatResponse, TraceViewResponse
+)
+
+@app.get("/api/system/incidents", response_model=List[IncidentResponse], tags=["Incidents"])
+async def list_incidents(
+    status: Optional[str] = Query(None, description="Incident status filter (OPEN, INVESTIGATING, RESOLVED, CLOSED)"),
+    severity: Optional[str] = Query(None, description="Severity filter (INFO, LOW, MEDIUM, HIGH, CRITICAL)"),
+    component: Optional[str] = Query(None, description="Component filter"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists incidents with optional status, severity, and component filtering."""
+    incidents = await incident_service.list_incidents(db, status=status, severity=severity, component=component)
+    return [IncidentResponse.model_validate(i) for i in incidents]
+
+@app.get("/api/system/incidents/{incident_id}", tags=["Incidents"])
+async def get_incident_detail(incident_id: str, db: AsyncSession = Depends(get_db)):
+    """Gets detailed incident metadata including timeline history events."""
+    inc = await incident_service.get_incident(db, incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+    return inc
+
+@app.post("/api/system/incidents/{incident_id}/acknowledge", tags=["Incidents"])
+async def acknowledge_incident(incident_id: str, req: IncidentAcknowledgeRequest, db: AsyncSession = Depends(get_db)):
+    """Marks an incident as INVESTIGATING and records operator acknowledgement."""
+    try:
+        return await incident_service.acknowledge_incident(db, incident_id, acknowledged_by=req.acknowledged_by or "Operator")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.post("/api/system/incidents/{incident_id}/resolve", tags=["Incidents"])
+async def resolve_incident(incident_id: str, req: IncidentResolveRequest, db: AsyncSession = Depends(get_db)):
+    """Resolves an incident with mandatory resolution note explanation."""
+    try:
+        return await incident_service.resolve_incident(db, incident_id, resolution_note=req.resolution_note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/system/jobs/failed", response_model=List[DeadLetterJobResponse], tags=["Observability"])
+async def list_dead_letter_jobs(db: AsyncSession = Depends(get_db)):
+    """Lists permanently failed Dead Letter Queue (DLQ) jobs."""
+    res = await db.execute(select(DeadLetterJob).where(DeadLetterJob.dismissed == False).order_by(DeadLetterJob.failed_at.desc()))
+    dlq_jobs = res.scalars().all()
+    return [DeadLetterJobResponse.model_validate(d) for d in dlq_jobs]
+
+@app.post("/api/system/jobs/{job_id}/retry", tags=["Observability"])
+async def retry_failed_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Manually retries a failed or dead-letter job."""
+    res = await db.execute(select(SystemJob).where(SystemJob.id == job_id))
+    job = res.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    job.status = "QUEUED"
+    job.retry_count = 0
+    await db.commit()
+
+    payload = json.loads(job.payload_json or "{}")
+    await queue_service._fallback_queue.put(payload)
+    return {"status": "success", "job_id": job_id, "message": "Job re-queued for execution."}
+
+@app.get("/api/system/trace/request/{request_id}", response_model=TraceViewResponse, tags=["Observability"])
+async def trace_request_id(request_id: str, db: AsyncSession = Depends(get_db)):
+    """Resolves end-to-end operational trace for a request_id."""
+    res = await telemetry_service.trace_request(db, request_id)
+    return TraceViewResponse.model_validate(res)
+
+@app.get("/api/system/trace/job/{job_id}", response_model=TraceViewResponse, tags=["Observability"])
+async def trace_job_id(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Resolves execution timeline for a job_id."""
+    res = await telemetry_service.trace_job(db, job_id)
+    return TraceViewResponse.model_validate(res)
+
+@app.get("/api/system/trace/content/{content_id}", response_model=TraceViewResponse, tags=["Observability"])
+async def trace_content_id(content_id: str, db: AsyncSession = Depends(get_db)):
+    """Resolves lifecycle timeline for a content_id."""
+    res = await telemetry_service.trace_content(db, content_id)
+    return TraceViewResponse.model_validate(res)
+
+@app.get("/api/system/telemetry/metrics", tags=["Observability"])
+async def get_system_telemetry_metrics(db: AsyncSession = Depends(get_db)):
+    """Returns histogram metric latency distributions and execution counts."""
+    return await telemetry_service.get_metrics_telemetry(db)
+
+@app.post("/api/system/maintenance", tags=["Observability"])
+async def set_system_maintenance_mode(enabled: bool = Query(..., description="Enable/disable maintenance mode")):
+    """Toggles operational Maintenance Mode (pausing automatic publishing)."""
+    incident_service.set_maintenance_mode(enabled)
+    return {"status": "success", "maintenance_mode": incident_service.is_maintenance_mode()}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+
 
 
