@@ -380,9 +380,11 @@ export default function ContentLibraryPage() {
 
                 <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                   <div>
-                    <h3 className="text-xs font-semibold text-white line-clamp-1 group-hover:text-indigo-300 transition-colors">
-                      {item.title}
-                    </h3>
+                    <Link href={`/content/${item.id}`}>
+                      <h3 className="text-xs font-semibold text-white line-clamp-1 group-hover:text-indigo-300 transition-colors cursor-pointer">
+                        {item.title}
+                      </h3>
+                    </Link>
                     <div className="flex items-center gap-2 text-[11px] text-gray-400 mt-1">
                       {primaryAsset?.width && primaryAsset?.height ? (
                         <span>{primaryAsset.width}x{primaryAsset.height}</span>
@@ -400,11 +402,11 @@ export default function ContentLibraryPage() {
                     </span>
 
                     <Link
-                      href={`/repurpose?id=${item.id}`}
+                      href={`/content/${item.id}`}
                       className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-500 text-indigo-300 hover:text-white text-[11px] font-medium transition-all"
                     >
                       <Sparkles className="w-3 h-3" />
-                      <span>Studio</span>
+                      <span>Workspace</span>
                     </Link>
                   </div>
                 </div>
