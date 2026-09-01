@@ -747,6 +747,55 @@ class ApiClient {
       headers: userId ? { 'X-User-Id': userId } : undefined
     });
   }
+
+  async getReadinessStatus(): Promise<{
+    status: string;
+    version: string;
+    dependencies: Record<string, { status: string; details?: string }>;
+  }> {
+    return this.request('/health/ready');
+  }
+
+  async getSystemMetrics(): Promise<{
+    status: string;
+    version: string;
+    cpu: { usage_percent: number; count: number } | null;
+    memory: { total_mb: number; used_mb: number; free_mb: number; usage_percent: number } | null;
+    disk: { total_gb: number; used_gb: number; free_gb: number; usage_percent: number; warning: boolean } | null;
+    database_connected: boolean | null;
+    redis_connected: boolean | null;
+  }> {
+    return this.request('/api/system/metrics');
+  }
+
+  async getSystemSettings(): Promise<{
+    status: string;
+    settings: {
+      gemini_configured: boolean;
+      openai_configured: boolean;
+      anthropic_configured: boolean;
+      storage_provider: string;
+      storage_dir: string;
+      max_upload_size_mb: number;
+      deployment_mode: string;
+      version: string;
+    };
+  }> {
+    return this.request('/api/system/settings');
+  }
+
+  async updateSystemSettings(data: {
+    gemini_api_key?: string;
+    openai_api_key?: string;
+    anthropic_api_key?: string;
+    storage_provider?: string;
+  }): Promise<{ status: string; message: string }> {
+    return this.request('/api/system/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
 }
 
 export const api = new ApiClient(API_BASE);
