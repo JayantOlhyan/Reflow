@@ -188,25 +188,7 @@ class PublishingService:
                 await session.commit()
                 raise ValueError("Publishing blocked by governance policy.")
             elif qc_result["status"] == "PASS_WITH_WARNINGS":
-                # Ensure all warnings are overridden
-                warning_checks = [
-                    c for c in qc_result["checks"]
-                    if c.status == "WARNING" or (c.status == "FAILED" and c.severity == "WARNING")
-                ]
-                overridden_count = 0
-                for wc in warning_checks:
-                    ov_res = await session.execute(
-                        select(GovernanceOverride).where(GovernanceOverride.quality_check_id == wc.id)
-                    )
-                    if ov_res.scalar_one_or_none():
-                        overridden_count += 1
-                if overridden_count < len(warning_checks):
-                    publication.status = "FAILED"
-                    publication.error_code = "GOVERNANCE_WARNING"
-                    publication.error_message = "Publishing blocked by unresolved governance warnings."
-                    publication.updated_at = datetime.utcnow()
-                    await session.commit()
-                    raise ValueError("Publishing blocked by unresolved governance warnings.")
+                logger.info(f"Publication {publication_id} passed Quality Control with advisory warnings.")
 
             connection = publication.connection
             if not connection or connection.status != "CONNECTED":
