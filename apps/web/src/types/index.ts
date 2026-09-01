@@ -823,6 +823,7 @@ export interface WebhookItem {
   url: string;
   events: string[];
   enabled: boolean;
+  secret?: string;
   last_success_at?: string | null;
   last_failure_at?: string | null;
   created_at: string;
