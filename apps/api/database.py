@@ -47,7 +47,7 @@ async def init_db():
     """Initializes database schema tables and runs safe column migrations."""
     from models.entities import (
         AutomationRule, AutomationExecution, AutomationActionExecution,
-        GovernancePolicy, BrandProfile, QualityCheck, ContentClaim, GovernanceOverride, GovernanceResult
+        GovernancePolicy, BrandProfile, QualityCheck, ContentClaim, GovernanceOverride, GovernanceResult, Notification
     )
     try:
         async with engine.begin() as conn:
