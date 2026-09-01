@@ -26,6 +26,8 @@ export const Sidebar: React.FC = () => {
   const mainNavItems = [
     { name: 'Overview', href: '/', icon: LayoutDashboard },
     { name: 'Content', href: '/content', icon: FolderOpen },
+    { name: 'Approvals', href: '/approvals', icon: ShieldCheck },
+    { name: 'Publishing', href: '/publishing', icon: Layers },
     { name: 'Repurpose', href: '/repurpose', icon: Sparkles },
     { name: 'Carousel', href: '/carousel', icon: Layers },
     { name: 'Workflows', href: '/workflows', icon: GitBranch },
