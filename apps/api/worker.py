@@ -343,10 +343,32 @@ async def process_single_job(payload: dict) -> bool:
                     await session.commit()
         return False
 
+async def reconcile_orphaned_jobs():
+    """Recovers jobs that were left in RUNNING state due to a worker container restart."""
+    try:
+        async with async_session_factory() as session:
+            orphans_res = await session.execute(
+                select(Job).where(Job.status == "RUNNING")
+            )
+            orphans = orphans_res.scalars().all()
+            for job in orphans:
+                logger.info(f"Reconciling orphaned job {job.id} (Type: {job.type}) reset to QUEUED.")
+                job.status = "QUEUED"
+                await session.commit()
+                await queue_service.enqueue_media_job(
+                    job.id, job.content_id, job.asset_id,
+                    carousel_id=getattr(job, "carousel_id", None),
+                    clip_id=getattr(job, "clip_id", None),
+                    job_type=job.type
+                )
+    except Exception as e:
+        logger.warn(f"Orphaned job reconciliation notice: {e}")
+
 async def run_worker():
     """Continuous background worker loop."""
     logger.info(f"Reflow Media & AI Worker started (concurrency={settings.MEDIA_WORKER_CONCURRENCY}). Listening for jobs...")
     await init_db()
+    await reconcile_orphaned_jobs()
 
     while True:
         try:
