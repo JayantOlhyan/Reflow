@@ -4,8 +4,8 @@ import re
 from datetime import datetime
 
 SENSITIVE_PATTERNS = [
-    (re.compile(r'(api[_-]?key|token|secret|password|authorization|access_token|refresh_token)\s*[:=]\s*([^\s,\'\"]+)', re.IGNORECASE), r'\1: [REDACTED]'),
-    (re.compile(r'Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*', re.IGNORECASE), r'Bearer [REDACTED]'),
+    (re.compile(r'Bearer\s+\S+', re.IGNORECASE), r'Bearer [REDACTED]'),
+    (re.compile(r'(api[_-]?key|token|secret|password|access_token|refresh_token)\s*[:=]\s*([^\s,\'\"]+)', re.IGNORECASE), r'\1: [REDACTED]'),
     (re.compile(r'AIzaSy[A-Za-z0-9_\-]{33}'), r'[REDACTED]'),
     (re.compile(r'sk-[A-Za-z0-9_\-]{20,}'), r'[REDACTED]'),
     (re.compile(r'client_secret=[^\s&]+', re.IGNORECASE), r'client_secret=[REDACTED]')
