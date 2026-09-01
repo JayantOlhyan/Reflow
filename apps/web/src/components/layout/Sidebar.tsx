@@ -19,7 +19,8 @@ import {
   Activity,
   ShieldCheck,
   Puzzle,
-  Globe
+  Globe,
+  Terminal
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -43,7 +44,8 @@ export const Sidebar: React.FC = () => {
   ];
 
   const systemNavItems = [
-    { name: 'Setup', href: '/setup', icon: ShieldCheck },
+    { name: 'Developers', href: '/developers', icon: Terminal },
+    { name: 'System Setup', href: '/setup', icon: ShieldCheck },
     { name: 'Incidents', href: '/system/incidents', icon: ShieldCheck },
     { name: 'Logs', href: '/system?tab=logs', icon: FileText },
     { name: 'Jobs', href: '/system?tab=jobs', icon: Layers },
