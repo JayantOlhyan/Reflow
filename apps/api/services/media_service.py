@@ -73,10 +73,33 @@ class MediaService:
             "file_size": int(fmt.get("size", 0)) if fmt.get("size") else None
         }
 
+    async def run_ffmpeg_command(self, cmd: List[str], timeout: Optional[int] = None) -> Tuple[bytes, bytes]:
+        """Executes FFmpeg with -threads 2 limit and configurable process timeout."""
+        if timeout is None:
+            timeout = settings.FFMPEG_TIMEOUT_SECONDS
+
+        if "-threads" not in cmd:
+            cmd = cmd[:1] + ["-threads", "2"] + cmd[1:]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            if proc.returncode != 0:
+                raise ValueError(f"FFmpeg execution failed: {stderr.decode(errors='ignore').strip()}")
+            return stdout, stderr
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise TimeoutError(f"FFmpeg command timed out after {timeout} seconds.")
+
     async def extract_audio(self, input_path: str, output_path: str) -> str:
-        """
-        Extracts clean audio as 16kHz mono MP3 for speech-to-text transcription.
-        """
+        """Extracts clean audio as 16kHz mono MP3 for speech-to-text transcription."""
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         cmd = [
             self.ffmpeg_path, "-y",
@@ -88,14 +111,7 @@ class MediaService:
             "-b:a", "64k",
             output_path
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise ValueError(f"Audio extraction failed: {stderr.decode().strip()}")
+        await self.run_ffmpeg_command(cmd)
         return output_path
 
     async def generate_thumbnail(self, input_path: str, output_path: str, timestamp: str = "00:00:01") -> str:
@@ -109,14 +125,7 @@ class MediaService:
             "-q:v", "2",
             output_path
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise ValueError(f"Thumbnail extraction failed: {stderr.decode().strip()}")
+        await self.run_ffmpeg_command(cmd)
         return output_path
 
     async def generate_variant(
@@ -157,14 +166,7 @@ class MediaService:
 
         cmd.append(output_path)
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise ValueError(f"FFmpeg variant generation for {target_format} failed: {stderr.decode().strip()}")
+        await self.run_ffmpeg_command(cmd)
         return output_path
 
     async def validate_output(self, output_path: str, expected_type: str = "video") -> Dict[str, Any]:
@@ -671,5 +673,7 @@ class MediaService:
                     shutil.rmtree(temp_dir, ignore_errors=True)
                 except Exception:
                     pass
+
+media_service = MediaService()
 
 media_processor = MediaService()
