@@ -1,7 +1,7 @@
 import os
 import aiofiles
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple
 from config import settings
 from utils.logging import get_logger
 
@@ -32,7 +32,8 @@ ALLOWED_MIME_PREFIXES = {
 def detect_content_type(filename: str) -> Optional[str]:
     if not filename or "." not in filename:
         return None
-    ext = filename.rsplit(".", 1)[-1].lower()
+    safe_name = os.path.basename(filename)
+    ext = safe_name.rsplit(".", 1)[-1].lower()
     return EXTENSION_TO_CONTENT_TYPE.get(ext)
 
 def validate_upload(filename: str, mime_type: str, file_size: int) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -40,28 +41,38 @@ def validate_upload(filename: str, mime_type: str, file_size: int) -> Tuple[bool
     Multi-layer validation for uploaded file.
     Returns: (is_valid, content_type_or_none, error_message_or_none)
     """
-    if not filename or "." not in filename:
+    if not filename:
+        return False, None, "Invalid filename. Filename cannot be empty."
+
+    # Sanitize path traversal attempts in filename
+    safe_filename = os.path.basename(filename.replace("\\", "/"))
+    if ".." in filename or safe_filename != filename:
+        # Check if malicious path characters were present
+        filename = safe_filename
+
+    if "." not in filename:
         return False, None, "Invalid filename. File must have an extension."
-    
+
     ext = filename.rsplit(".", 1)[-1].lower()
     content_type = EXTENSION_TO_CONTENT_TYPE.get(ext)
     if not content_type:
         return False, None, f"Unsupported file extension '.{ext}'. Supported: {', '.join(sorted(EXTENSION_TO_CONTENT_TYPE.keys()))}"
-    
+
     # MIME validation
     if mime_type and not any(mime_type.lower().startswith(prefix) for prefix in ALLOWED_MIME_PREFIXES):
         return False, None, f"Unsupported MIME type '{mime_type}'."
-        
+
     # Size validation
     max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
     if file_size > max_bytes:
         return False, None, f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB}MB."
-        
+
     return True, content_type, None
 
 def generate_storage_key(content_id: str, asset_id: str, filename: str) -> str:
     """Generates collision-free, path-safe storage key."""
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    safe_filename = os.path.basename(filename)
+    ext = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else "bin"
     return f"content/{content_id}/original/{asset_id}.{ext}"
 
 class BaseStorageService(ABC):
