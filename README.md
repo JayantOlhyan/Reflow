@@ -8,6 +8,7 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 
 ## Features
 
+- **Real Observability, Reliability & Incident Engine (`/system`, `/system/incidents`)**: Production-grade observability framework with zero fake metrics, correlation tracking (`request_id`, `job_id`, `content_id`, `publication_id`), persistent job state machine, Dead-Letter Queue (DLQ) with 1-click retry, 15-minute grouped incident deduplication, operator resolution notes, latency histograms, and Maintenance Mode controls.
 - **Decentralized Ecosystem & Integration Hub (`/ecosystem`)**: Decentralized, self-hosted plugin hub for discovering, inspecting, configuring, installing, updating, and removing community & official plugins (`registry/registry.json`). Features SSRF protection, SHA-256 checksum verification, circular dependency detection, secret masking, atomic updates with automated rollback, and permission consent dialogs.
 - **Open-Source Plugin Ecosystem (`/plugins`)**: Contract-driven plugin architecture (`PluginRegistry`) for custom social platforms, AI providers, storage drivers, media transcoders, and workflow actions with error isolation, permissions, and CLI generator (`python scripts/create-plugin.py`).
 - **Outbound Webhooks System (`/settings/webhooks`)**: Signed HTTP webhook delivery (HMAC-SHA256) with exponential backoff retries and recipient event deduplication.
