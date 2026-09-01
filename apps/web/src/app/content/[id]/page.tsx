@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -12,7 +12,7 @@ import {
 import { ContentItem, ClipItem, CarouselItem, PublicationItem } from '@/types';
 import { api, API_BASE } from '@/lib/api';
 
-export default function UnifiedContentWorkspacePage() {
+function ContentWorkspaceContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -53,11 +53,11 @@ export default function UnifiedContentWorkspacePage() {
 
       // Load sub-entity collections concurrently
       const [clipsRes, carouselsRes, pubsRes, govRes, anaRes] = await Promise.allSettled([
-        api.getClips(contentId),
+        api.getContentClips(contentId),
         api.getCarousels(contentId),
         api.getPublications(contentId),
         api.getGovernanceResult(contentId),
-        api.getContentAnalytics(contentId)
+        api.getContentAnalytics()
       ]);
 
       if (clipsRes.status === 'fulfilled') setClips(clipsRes.value.items || []);
@@ -389,12 +389,12 @@ export default function UnifiedContentWorkspacePage() {
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-white truncate">{c.title || 'Untitled Clip'}</span>
                     <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded font-mono text-[10px]">
-                      {c.duration_seconds}s
+                      {c.duration}s
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 italic font-serif">"{c.hook}"</p>
                   <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
-                    <span className="text-slate-500 font-mono text-[10px]">Score: {c.virality_score}/100</span>
+                    <span className="text-slate-500 font-mono text-[10px]">Score: {c.score || c.quality_score || 85}/100</span>
                     <button
                       onClick={() => router.push(`/repurpose?clip_id=${c.id}`)}
                       className="text-indigo-400 hover:underline font-medium text-xs"
@@ -574,5 +574,13 @@ export default function UnifiedContentWorkspacePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function UnifiedContentWorkspacePage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Loading content workspace...</div>}>
+      <ContentWorkspaceContent />
+    </Suspense>
   );
 }
