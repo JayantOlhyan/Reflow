@@ -781,3 +781,26 @@ export interface AutomationDetailResponse {
   };
 }
 
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  severity: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
+  read: boolean;
+  entity_type?: string;
+  entity_id?: string;
+  created_at: string;
+}
+
+export interface SearchResultItem {
+  id: string;
+  type: 'content' | 'clip' | 'carousel' | 'publication' | 'experiment' | 'automation';
+  title: string;
+  subtitle?: string;
+  url: string;
+  status?: string;
+  created_at?: string;
+}
+
+
