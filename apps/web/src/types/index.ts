@@ -875,4 +875,50 @@ export interface PluginAuditLogItem {
   created_at: string;
 }
 
+export interface SystemIncidentItem {
+  id: string;
+  title: string;
+  severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: 'OPEN' | 'INVESTIGATING' | 'MITIGATED' | 'RESOLVED' | 'CLOSED';
+  component: string;
+  error_code?: string | null;
+  description: string;
+  started_at: string;
+  resolved_at?: string | null;
+  acknowledged_at?: string | null;
+  acknowledged_by?: string | null;
+  resolution_note?: string | null;
+  affected_resources?: Record<string, any>;
+  timeline?: IncidentTimelineEvent[];
+}
+
+export interface IncidentTimelineEvent {
+  id: string;
+  incident_id: string;
+  event_type: string;
+  description: string;
+  created_at: string;
+}
+
+export interface DeadLetterJobItem {
+  id: string;
+  job_id: string;
+  job_type: string;
+  content_id?: string | null;
+  publication_id?: string | null;
+  attempts: number;
+  last_error?: string | null;
+  error_code?: string | null;
+  dismissed: boolean;
+  failed_at: string;
+}
+
+export interface TraceViewData {
+  trace_id: string;
+  trace_type: string;
+  items: Array<Record<string, any>>;
+  created_at: string;
+}
+
+
 
