@@ -135,7 +135,11 @@ class ApiClient {
   }
 
   // Phase 4 Carousel Engine API
-  async getCarousels(page: number = 1, limit: number = 20): Promise<CarouselListResponse> {
+  async getCarousels(contentIdOrPage?: string | number, limit: number = 20): Promise<CarouselListResponse> {
+    if (typeof contentIdOrPage === 'string') {
+      return this.request<CarouselListResponse>(`/api/carousels?content_id=${encodeURIComponent(contentIdOrPage)}`);
+    }
+    const page = typeof contentIdOrPage === 'number' ? contentIdOrPage : 1;
     return this.request<CarouselListResponse>(`/api/carousels?page=${page}&limit=${limit}`);
   }
 
@@ -229,11 +233,6 @@ class ApiClient {
   async getClips(contentId?: string): Promise<ClipListResponse> {
     if (contentId) return this.getContentClips(contentId);
     return this.request<ClipListResponse>('/api/clips');
-  }
-
-  async getCarousels(contentId?: string): Promise<CarouselListResponse> {
-    const qs = contentId ? `?content_id=${encodeURIComponent(contentId)}` : '';
-    return this.request<CarouselListResponse>(`/api/carousels${qs}`);
   }
 
   async getGovernanceResult(contentId: string): Promise<any> {
