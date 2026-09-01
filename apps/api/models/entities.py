@@ -1078,5 +1078,18 @@ class WorkerHeartbeat(Base):
     last_heartbeat = Column(DateTime, default=datetime.utcnow)
 
 
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+
+    id = Column(String(64), primary_key=True, index=True)
+    key = Column(String(128), index=True, nullable=False)
+    request_hash = Column(String(128), nullable=False)
+    status_code = Column(Integer, default=200)
+    response_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+
+
+
 
 
