@@ -886,3 +886,17 @@ class GovernanceResult(Base):
     info_count = Column(Integer, default=0)
     evaluated_at = Column(DateTime, default=datetime.utcnow, index=True)
     policy_version = Column(Integer, default=1)
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(String(64), primary_key=True, index=True)
+    type = Column(String(64), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    severity = Column(String(32), default="INFO", index=True)
+    read = Column(Boolean, default=False, index=True)
+    entity_type = Column(String(64), nullable=True)
+    entity_id = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
