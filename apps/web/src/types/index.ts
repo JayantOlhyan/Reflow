@@ -838,4 +838,41 @@ export interface APIKeyItem {
   expires_at?: string | null;
 }
 
+export interface EcosystemPluginItem {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  repository?: string | null;
+  homepage?: string | null;
+  license?: string | null;
+  plugin_type: string;
+  api_version: string;
+  reflow_version: string;
+  capabilities: string[];
+  permissions: string[];
+  checksum: string;
+  documentation?: string | null;
+  source_type: 'OFFICIAL' | 'COMMUNITY' | 'LOCAL';
+  changelog?: string | null;
+  is_installed: boolean;
+  installed_version?: string | null;
+  update_available: boolean;
+  latest_version?: string | null;
+  usage_stats?: {
+    active_connections: number;
+    publications_created: number;
+    automations_using: number;
+  };
+}
+
+export interface PluginAuditLogItem {
+  id: string;
+  plugin_id: string;
+  action: string;
+  details: Record<string, any>;
+  created_at: string;
+}
+
 
