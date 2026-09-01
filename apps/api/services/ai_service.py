@@ -1,5 +1,8 @@
+import os
 import json
 import uuid
+import hashlib
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from sqlalchemy import select, delete
@@ -27,6 +30,13 @@ class AIService:
     def __init__(self):
         self.prompt_version = "v1"
         self._provider: Optional[BaseAIProvider] = None
+        self._ai_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _compute_cache_key(self, task: str, payload_str: str) -> str:
+        """Computes a stable SHA-256 cache key for AI request deduplication."""
+        provider = self.get_provider()
+        raw = f"{provider.provider_name}:{task}:{self.prompt_version}:{payload_str}"
+        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
     def get_provider(self) -> BaseAIProvider:
         """Dynamically instantiates active AI provider based on BYOK configuration."""
