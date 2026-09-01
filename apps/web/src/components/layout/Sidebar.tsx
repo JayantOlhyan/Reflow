@@ -17,7 +17,8 @@ import {
   FileText,
   Layers,
   Activity,
-  ShieldCheck
+  ShieldCheck,
+  Puzzle
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -33,6 +34,7 @@ export const Sidebar: React.FC = () => {
     { name: 'Workflows', href: '/workflows', icon: GitBranch },
     { name: 'Calendar', href: '/calendar', icon: Calendar },
     { name: 'Connections', href: '/connections', icon: Share2 },
+    { name: 'Plugins', href: '/plugins', icon: Puzzle },
     { name: 'Analytics', href: '/analytics', icon: BarChart3 },
     { name: 'Intelligence', href: '/intelligence', icon: Lightbulb },
     { name: 'Settings', href: '/settings', icon: Settings },
