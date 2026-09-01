@@ -41,6 +41,13 @@ function SystemContent() {
     }
   });
 
+  const [metrics, setMetrics] = useState<{
+    status: string;
+    cpu: { usage_percent: number; count: number } | null;
+    memory: { total_mb: number; used_mb: number; free_mb: number; usage_percent: number } | null;
+    disk: { total_gb: number; used_gb: number; free_gb: number; usage_percent: number; warning: boolean } | null;
+  } | null>(null);
+
   const [jobs, setJobs] = useState<PublishingJob[]>([]);
   const [logs, setLogs] = useState<SystemLog[]>([]);
 
@@ -49,6 +56,8 @@ function SystemContent() {
       setLoading(true);
       const health = await api.getSystemHealth();
       setHealthData(health);
+      const metricsData = await api.getSystemMetrics().catch(() => null);
+      setMetrics(metricsData);
       const fetchedJobs = await api.getSystemJobs();
       setJobs(fetchedJobs);
       const fetchedLogs = await api.getSystemLogs();
@@ -122,6 +131,51 @@ function SystemContent() {
 
       {activeTab === 'health' && (
         <div className="space-y-5">
+          {/* Resource Telemetry */}
+          <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-indigo-400" />
+                <h2 className="text-sm font-bold text-white">Resource Metrics</h2>
+              </div>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
+                metrics?.status === 'AVAILABLE'
+                  ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                  : 'text-gray-400 bg-gray-700/20 border-gray-600'
+              }`}>
+                {metrics?.status === 'AVAILABLE' ? 'REALTIME METRICS' : 'UNAVAILABLE'}
+              </span>
+            </div>
+
+            {metrics?.status === 'AVAILABLE' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
+                <div className="bg-[#161B26] p-3 rounded-xl border border-[#1F2937] space-y-1">
+                  <span className="text-gray-400 text-[11px]">CPU Usage</span>
+                  <p className="text-lg font-bold text-white">{metrics.cpu?.usage_percent}%</p>
+                  <p className="text-[10px] text-gray-500">{metrics.cpu?.count} Cores Available</p>
+                </div>
+
+                <div className="bg-[#161B26] p-3 rounded-xl border border-[#1F2937] space-y-1">
+                  <span className="text-gray-400 text-[11px]">RAM Memory</span>
+                  <p className="text-lg font-bold text-white">{metrics.memory?.usage_percent}%</p>
+                  <p className="text-[10px] text-gray-500">{metrics.memory?.used_mb}MB / {metrics.memory?.total_mb}MB</p>
+                </div>
+
+                <div className="bg-[#161B26] p-3 rounded-xl border border-[#1F2937] space-y-1">
+                  <span className="text-gray-400 text-[11px]">Disk Storage</span>
+                  <p className={`text-lg font-bold ${metrics.disk?.warning ? 'text-amber-400' : 'text-white'}`}>
+                    {metrics.disk?.usage_percent}%
+                  </p>
+                  <p className="text-[10px] text-gray-500">{metrics.disk?.used_gb}GB / {metrics.disk?.total_gb}GB</p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 bg-[#161B26] rounded-xl border border-[#1F2937] text-xs text-gray-400 font-mono">
+                System resource metrics (psutil) are currently UNAVAILABLE on this host environment.
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Database Component */}
             <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
