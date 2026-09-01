@@ -1,0 +1,15 @@
+{
+  "id": "example-storage-provider",
+  "name": "Example Storage Provider (EXAMPLE ONLY)",
+  "version": "1.0.0",
+  "description": "Demonstrates custom storage driver plugin contract (EXAMPLE ONLY).",
+  "author": "Reflow Community",
+  "type": "STORAGE",
+  "entrypoint": "example_storage:ExampleStoragePlugin",
+  "api_version": "1.0.0",
+  "capabilities": ["put", "get", "delete", "exists"],
+  "permissions": ["STORAGE_READ", "STORAGE_WRITE"],
+  "configuration": {
+    "bucket_name": "string"
+  }
+}
