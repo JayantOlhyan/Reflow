@@ -1,0 +1,15 @@
+{
+  "id": "example-workflow-action",
+  "name": "Example Workflow Action (EXAMPLE ONLY)",
+  "version": "1.0.0",
+  "description": "Demonstrates custom workflow automation action plugin contract (EXAMPLE ONLY).",
+  "author": "Reflow Community",
+  "type": "WORKFLOW_ACTION",
+  "entrypoint": "example_workflow:ExampleWorkflowPlugin",
+  "api_version": "1.0.0",
+  "capabilities": ["execute"],
+  "permissions": ["NETWORK_ACCESS"],
+  "configuration": {
+    "target_email": "string"
+  }
+}
