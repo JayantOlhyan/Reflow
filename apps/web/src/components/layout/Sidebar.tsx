@@ -16,7 +16,8 @@ import {
   Settings,
   FileText,
   Layers,
-  Activity
+  Activity,
+  ShieldCheck
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -36,6 +37,7 @@ export const Sidebar: React.FC = () => {
   ];
 
   const systemNavItems = [
+    { name: 'Setup', href: '/setup', icon: ShieldCheck },
     { name: 'Logs', href: '/system?tab=logs', icon: FileText },
     { name: 'Jobs', href: '/system?tab=jobs', icon: Layers },
     { name: 'Health', href: '/system?tab=health', icon: Activity, badge: 'healthy' },
