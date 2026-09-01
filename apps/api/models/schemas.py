@@ -1294,4 +1294,142 @@ class PluginAuditLogItem(BaseModel):
     created_at: datetime
 
 
+class SystemJobResponse(BaseModel):
+    id: str
+    job_type: str
+    status: str
+    content_id: Optional[str] = None
+    asset_id: Optional[str] = None
+    publication_id: Optional[str] = None
+    retry_count: int = 0
+    max_retries: int = 3
+    queued_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    error_code: Optional[str] = None
+    duration_ms: Optional[float] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeadLetterJobResponse(BaseModel):
+    id: str
+    job_id: str
+    job_type: str
+    content_id: Optional[str] = None
+    publication_id: Optional[str] = None
+    attempts: int
+    last_error: Optional[str] = None
+    error_code: Optional[str] = None
+    dismissed: bool = False
+    failed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentResponse(BaseModel):
+    id: str
+    title: str
+    severity: str
+    status: str
+    component: str
+    error_code: Optional[str] = None
+    description: str
+    started_at: datetime
+    resolved_at: Optional[datetime] = None
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
+    resolution_note: Optional[str] = None
+    affected_resources: Dict[str, Any] = {}
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentAcknowledgeRequest(BaseModel):
+    acknowledged_by: Optional[str] = Field(default="Operator", description="Operator name or ID")
+
+
+class IncidentResolveRequest(BaseModel):
+    resolution_note: str = Field(..., min_length=5, description="Required explanation of how the incident was resolved")
+
+
+class IncidentEventResponse(BaseModel):
+    id: str
+    incident_id: str
+    event_type: str
+    description: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SystemEventResponse(BaseModel):
+    id: str
+    event_type: str
+    entity_type: Optional[str] = None
+    entity_id: Optional[str] = None
+    severity: str = "INFO"
+    payload: Dict[str, Any] = {}
+    created_at: datetime
+
+
+class AlertRuleResponse(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
+    condition_type: str
+    threshold_value: float = 1.0
+    severity: str = "HIGH"
+    cooldown_minutes: int = 15
+    last_triggered_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AlertRuleCreateRequest(BaseModel):
+    name: str
+    condition_type: str
+    threshold_value: float = 1.0
+    severity: str = "HIGH"
+    cooldown_minutes: int = 15
+
+
+class HealthHistoryResponse(BaseModel):
+    id: str
+    component: str
+    status: str
+    details: Optional[str] = None
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkerHeartbeatResponse(BaseModel):
+    id: str
+    worker_id: str
+    worker_type: str
+    status: str
+    jobs_processed: int
+    jobs_failed: int
+    current_job_id: Optional[str] = None
+    last_heartbeat: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TraceViewResponse(BaseModel):
+    trace_id: str
+    trace_type: str
+    items: List[Dict[str, Any]]
+    created_at: str
+
+    plugin_id: str
+    action: str
+    details: Dict[str, Any] = {}
+    created_at: datetime
+
+
 
