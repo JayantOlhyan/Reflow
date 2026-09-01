@@ -26,7 +26,7 @@ export default function QuickCreateModal({ isOpen, onClose }: QuickCreateModalPr
     try {
       setIsUploading(true);
       setError(null);
-      const res = await api.uploadContent(selectedFile);
+      const res = await api.uploadFile(selectedFile);
       onClose();
       router.push(`/content/${res.id}`);
     } catch (e: any) {
@@ -41,10 +41,7 @@ export default function QuickCreateModal({ isOpen, onClose }: QuickCreateModalPr
     try {
       setIsUploading(true);
       setError(null);
-      const res = await api.createTextContent({
-        title: textTitle,
-        text_content: textContent
-      });
+      const res = await api.createTextContent(textTitle, textContent);
       onClose();
       router.push(`/content/${res.id}`);
     } catch (e: any) {
