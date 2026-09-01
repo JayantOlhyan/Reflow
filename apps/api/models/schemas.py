@@ -1182,3 +1182,61 @@ class GlobalSearchResponse(BaseModel):
     results: List[GlobalSearchResultItem]
 
 
+# Phase 17: Extensibility & Plugin System Schemas
+class PluginSchema(BaseModel):
+    id: str
+    name: str
+    version: str
+    description: str
+    author: str
+    type: str
+    api_version: str
+    capabilities: List[str] = []
+    permissions: List[str] = []
+    enabled: bool
+    status: str
+    error: Optional[str] = None
+
+class PluginListResponse(BaseModel):
+    plugins: List[PluginSchema]
+    total: int
+
+class WebhookResponse(BaseModel):
+    id: str
+    url: str
+    events: List[str]
+    enabled: bool
+    last_success_at: Optional[datetime] = None
+    last_failure_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class WebhookCreateRequest(BaseModel):
+    url: str = Field(..., description="Target HTTPS webhook URL")
+    events: List[str] = Field(default_factory=list, description="Subscribed event topics")
+
+class APIKeyCreateRequest(BaseModel):
+    name: str = Field(..., description="Name or service tag for API key")
+    permissions: List[str] = Field(default_factory=lambda: ["CONTENT_READ"], description="Granted permission scopes")
+    expires_in_days: Optional[int] = Field(default=None, description="Optional validity duration in days")
+
+class APIKeyCreatedResponse(BaseModel):
+    id: str
+    name: str
+    prefix: str
+    raw_api_key: str = Field(..., description="Raw API key — shown ONLY once during creation!")
+    permissions: List[str]
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+
+class APIKeyResponse(BaseModel):
+    id: str
+    name: str
+    prefix: str
+    permissions: List[str]
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+
