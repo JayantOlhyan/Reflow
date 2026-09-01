@@ -7,15 +7,19 @@ import {
   ArrowUpRight, 
   Layers, 
   Clock, 
-  AlertCircle, 
+  AlertTriangle, 
   CheckCircle2, 
   TrendingUp,
   Plus,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  ShieldCheck,
+  Calendar,
+  Lightbulb,
+  ArrowRight
 } from 'lucide-react';
-import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon } from '@/components/ui/SocialIcons';
 import { api } from '@/lib/api';
+import { PublicationItem, NotificationItem } from '@/types';
 
 export default function OverviewPage() {
   const [loading, setLoading] = useState(true);
@@ -28,16 +32,21 @@ export default function OverviewPage() {
     recent_activity: []
   });
 
-  const [healthStatus, setHealthStatus] = useState<string>("checking");
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [publications, setPublications] = useState<PublicationItem[]>([]);
 
   useEffect(() => {
     async function loadData() {
       try {
         setLoading(true);
-        const data = await api.getOverview();
+        const [data, notifRes, pubRes] = await Promise.all([
+          api.getOverview(),
+          api.getNotifications(10),
+          api.getPublications()
+        ]);
         setOverview(data);
-        const health = await api.getSystemHealth();
-        setHealthStatus(health.status);
+        setNotifications(notifRes.items || []);
+        setPublications(pubRes.items || []);
       } catch (err: any) {
         console.warn("Could not load overview from server:", err);
         setError("Unable to connect to Reflow API server.");
@@ -50,34 +59,23 @@ export default function OverviewPage() {
 
   const metrics = overview.metrics;
 
-  const statusBadge = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'published':
-      case 'succeeded':
-        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Published</span>;
-      case 'processing':
-      case 'running':
-        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse">Processing</span>;
-      case 'scheduled':
-      case 'queued':
-        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">Queued</span>;
-      case 'failed':
-        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">Failed</span>;
-      default:
-        return <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-gray-700/50 text-gray-300">{status || 'Draft'}</span>;
-    }
-  };
+  // Needs Attention items
+  const failedPubs = publications.filter(p => p.status === 'FAILED' || p.status === 'REAUTH_REQUIRED');
+  const pendingApprovals = publications.filter(p => p.status === 'DRAFT' || p.error_code === 'GOVERNANCE_WARNING');
+  const errorNotifs = notifications.filter(n => n.severity === 'ERROR' || n.severity === 'WARNING');
+
+  const upcomingScheduled = publications.filter(p => p.status === 'SCHEDULED').slice(0, 5);
 
   return (
     <div className="space-y-8 animate-fadeIn">
-      {/* Top Greeting */}
+      {/* Top Greeting & Primary CTA */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-2">
-            Good evening, Jayant <span className="inline-block animate-wave">👋</span>
+            Workspace Overview <span className="inline-block">⚡</span>
           </h1>
           <p className="text-sm text-gray-400 mt-1">
-            Here&apos;s what&apos;s happening with your content pipeline across connected platforms.
+            Real-time status of your content pipeline, publication dispatches, and system attention items.
           </p>
         </div>
 
@@ -90,171 +88,142 @@ export default function OverviewPage() {
             <span>Repurpose Media</span>
           </Link>
           <Link
-            href="/carousel"
+            href="/content"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#161B26] hover:bg-[#1F2937] border border-[#1F2937] text-gray-200 text-xs font-semibold transition-all"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Create Carousel</span>
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>Content Library</span>
           </Link>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 flex items-center justify-between">
-          <span>{error} Operating in offline mode.</span>
-          <button onClick={() => window.location.reload()} className="underline font-semibold">Retry</button>
+      {/* NEEDS ATTENTION SECTION (Action-Oriented Queue) */}
+      {(failedPubs.length > 0 || pendingApprovals.length > 0 || errorNotifs.length > 0) && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-rose-300 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-rose-400" />
+              <span>Needs Attention ({failedPubs.length + pendingApprovals.length})</span>
+            </h2>
+            <Link href="/approvals" className="text-xs font-medium text-rose-400 hover:underline">
+              Open Approvals & Fixes →
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {failedPubs.map(p => (
+              <div key={p.id} className="p-3.5 bg-slate-900/90 rounded-xl border border-rose-500/30 flex items-center justify-between text-xs">
+                <div>
+                  <span className="font-bold text-white uppercase">{p.platform}</span>: <span className="text-slate-300">{p.title || p.id}</span>
+                  <div className="text-rose-400 text-[11px] mt-0.5">{p.error_message || "Publishing failed."}</div>
+                </div>
+                <Link href={`/publishing?id=${p.id}`} className="px-3 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 rounded-lg font-medium whitespace-nowrap">
+                  Retry →
+                </Link>
+              </div>
+            ))}
+
+            {pendingApprovals.map(p => (
+              <div key={p.id} className="p-3.5 bg-slate-900/90 rounded-xl border border-amber-500/30 flex items-center justify-between text-xs">
+                <div>
+                  <span className="font-bold text-amber-300 uppercase">{p.platform}</span>: <span className="text-slate-300">{p.title || p.id}</span>
+                  <div className="text-amber-400/80 text-[11px] mt-0.5">Awaiting sign-off</div>
+                </div>
+                <Link href="/approvals" className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 rounded-lg font-medium whitespace-nowrap">
+                  Approve →
+                </Link>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-[#111827]/80 backdrop-blur-sm border border-[#1F2937] rounded-2xl p-5 hover:border-indigo-500/40 transition-all group">
-          <div className="flex items-center justify-between text-gray-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Total Content</span>
-            <Layers className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.total}</span>
-          </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">Assets in repository</span>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+          <div className="text-xs text-slate-400 font-medium">Total Content Items</div>
+          <div className="text-2xl font-bold text-white">{metrics.total}</div>
         </div>
-
-        <div className="bg-[#111827]/80 backdrop-blur-sm border border-[#1F2937] rounded-2xl p-5 hover:border-emerald-500/40 transition-all group">
-          <div className="flex items-center justify-between text-gray-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Published</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.published}</span>
-          </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">Live across platforms</span>
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+          <div className="text-xs text-slate-400 font-medium">Published Posts</div>
+          <div className="text-2xl font-bold text-emerald-400">{metrics.published}</div>
         </div>
-
-        <div className="bg-[#111827]/80 backdrop-blur-sm border border-[#1F2937] rounded-2xl p-5 hover:border-amber-500/40 transition-all group">
-          <div className="flex items-center justify-between text-gray-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Scheduled</span>
-            <Clock className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.scheduled}</span>
-          </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">Upcoming queue items</span>
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+          <div className="text-xs text-slate-400 font-medium">Scheduled Queue</div>
+          <div className="text-2xl font-bold text-indigo-400">{metrics.scheduled}</div>
         </div>
-
-        <div className="bg-[#111827]/80 backdrop-blur-sm border border-[#1F2937] rounded-2xl p-5 hover:border-rose-500/40 transition-all group">
-          <div className="flex items-center justify-between text-gray-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Failed</span>
-            <AlertCircle className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white tracking-tight">{loading ? '...' : metrics.failed}</span>
-          </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">Action needed</span>
+        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+          <div className="text-xs text-slate-400 font-medium">Failed Dispatches</div>
+          <div className="text-2xl font-bold text-rose-400">{metrics.failed}</div>
         </div>
       </div>
 
-      {/* Main Grid: Recent Activity & Content Distribution */}
+      {/* Upcoming Schedule & Quick Links Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Recent Activity */}
-        <div className="lg:col-span-7 bg-[#111827]/80 border border-[#1F2937] rounded-2xl p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h2 className="text-base font-semibold text-white">Recent Activity</h2>
-                <p className="text-xs text-gray-400">Latest pipeline executions and status</p>
-              </div>
-              <Link href="/content" className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
-                View all <ArrowUpRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
+        {/* Upcoming Queue */}
+        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-indigo-400" />
+              <span>Upcoming Scheduled Dispatches</span>
+            </h3>
+            <Link href="/calendar" className="text-xs text-indigo-400 hover:underline">View Calendar →</Link>
+          </div>
 
-            {loading ? (
-              <div className="py-12 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                <span>Loading activity stream...</span>
-              </div>
-            ) : overview.recent_activity.length === 0 ? (
-              <div className="py-12 text-center text-xs text-gray-500 space-y-2">
-                <FolderOpen className="w-8 h-8 text-gray-600 mx-auto" />
-                <p className="text-gray-400 font-medium">No recent activity yet</p>
-                <p className="text-[11px]">Upload an asset or create a repurpose job to get started.</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-[#1F2937]">
-                {overview.recent_activity.map((item) => (
-                  <div key={item.id} className="py-3.5 flex items-center justify-between gap-4 first:pt-0 last:pb-0 px-2 hover:bg-[#161B26]/50 rounded-xl transition-colors">
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-[#161B26] border border-[#1F2937] flex items-center justify-center flex-shrink-0">
-                        <Sparkles className="w-4 h-4 text-indigo-400" />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-semibold text-white truncate">{item.title}</h4>
-                        <p className="text-[11px] text-gray-400 truncate">{item.created_at || 'Recently'}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      {statusBadge(item.status)}
-                    </div>
+          {upcomingScheduled.length === 0 ? (
+            <div className="py-10 text-center text-xs text-slate-500">No upcoming posts scheduled.</div>
+          ) : (
+            <div className="space-y-2">
+              {upcomingScheduled.map(p => (
+                <div key={p.id} className="p-3 bg-slate-850 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3">
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-purple-500/20 text-purple-300 rounded uppercase">
+                      {p.platform}
+                    </span>
+                    <span className="font-medium text-white">{p.title || p.id}</span>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Content Distribution Donut Card */}
-        <div className="lg:col-span-5 bg-[#111827]/80 border border-[#1F2937] rounded-2xl p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base font-semibold text-white">Content Distribution</h2>
-                <p className="text-xs text-gray-400">Total published volume across channels</p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center py-6">
-              <div className="relative w-44 h-44 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="38" fill="transparent" stroke="#1F2937" strokeWidth="12" />
-                  {metrics.published > 0 && (
-                    <circle
-                      cx="50" cy="50" r="38"
-                      fill="transparent"
-                      stroke="#6366F1"
-                      strokeWidth="12"
-                      strokeDasharray="238.76"
-                      strokeDashoffset="0"
-                      strokeLinecap="round"
-                    />
-                  )}
-                </svg>
-
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="text-3xl font-extrabold text-white tracking-tight">{loading ? '...' : metrics.published}</span>
-                  <span className="text-[11px] font-medium text-gray-400">Published</span>
+                  <span className="text-slate-400 font-mono text-[11px]">
+                    {p.scheduled_for ? new Date(p.scheduled_for).toLocaleString() : 'Pending'}
+                  </span>
                 </div>
-              </div>
+              ))}
             </div>
-          </div>
+          )}
+        </div>
 
-          <div className="pt-3 border-t border-[#1F2937] text-center text-xs text-gray-500">
-            {metrics.published === 0 ? "No published outputs yet" : `${metrics.published} live outputs distributed`}
+        {/* Smart Recommendations */}
+        <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <h3 className="text-base font-semibold text-white flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-amber-400" />
+            <span>Smart Shortcuts</span>
+          </h3>
+
+          <div className="space-y-3">
+            <Link
+              href="/repurpose"
+              className="p-3.5 rounded-xl bg-slate-850/80 hover:bg-indigo-600/10 border border-slate-800 hover:border-indigo-500/40 transition block group"
+            >
+              <div className="text-xs font-semibold text-white group-hover:text-indigo-300">Extract Viral Clips</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">Turn long-form video into high-retention clips.</div>
+            </Link>
+
+            <Link
+              href="/carousel"
+              className="p-3.5 rounded-xl bg-slate-850/80 hover:bg-purple-600/10 border border-slate-800 hover:border-purple-500/40 transition block group"
+            >
+              <div className="text-xs font-semibold text-white group-hover:text-purple-300">Design Multi-Slide Deck</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">Generate PDF carousels for LinkedIn & Instagram.</div>
+            </Link>
+
+            <Link
+              href="/intelligence"
+              className="p-3.5 rounded-xl bg-slate-850/80 hover:bg-amber-600/10 border border-slate-800 hover:border-amber-500/40 transition block group"
+            >
+              <div className="text-xs font-semibold text-white group-hover:text-amber-300">Content Intelligence</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">Discover content gaps and hook recommendations.</div>
+            </Link>
           </div>
         </div>
-      </div>
-
-      {/* System Health Strip */}
-      <div className="bg-[#111827]/60 border border-[#1F2937] rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <div className={`w-2.5 h-2.5 rounded-full ${healthStatus === 'healthy' ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]' : 'bg-amber-400'}`} />
-          <span className="text-xs font-semibold text-white">
-            {healthStatus === 'healthy' ? 'Self-Hosted Engine Operational' : 'Telemetry Degraded / Standalone'}
-          </span>
-        </div>
-        <Link href="/system?tab=health" className="text-xs text-indigo-400 hover:text-indigo-300 font-medium">
-          Health Telemetry &rarr;
-        </Link>
       </div>
     </div>
   );
