@@ -857,6 +857,64 @@ class ApiClient {
   async getCarouselDetail(carouselId: string): Promise<CarouselItem> {
     return this.request<CarouselItem>(`/api/carousels/${carouselId}`);
   }
+
+  // Phase 17: Extensibility, Plugins, Webhooks & API Keys API Methods
+  async getPlugins(type?: string): Promise<{ plugins: import('@/types').PluginItem[]; total: number }> {
+    const qs = type ? `?type=${encodeURIComponent(type)}` : '';
+    return this.request<{ plugins: import('@/types').PluginItem[]; total: number }>(`/api/plugins${qs}`);
+  }
+
+  async getPlugin(pluginId: string): Promise<import('@/types').PluginItem> {
+    return this.request<import('@/types').PluginItem>(`/api/plugins/${pluginId}`);
+  }
+
+  async enablePlugin(pluginId: string): Promise<import('@/types').PluginItem> {
+    return this.request<import('@/types').PluginItem>(`/api/plugins/${pluginId}/enable`, { method: 'POST' });
+  }
+
+  async disablePlugin(pluginId: string): Promise<import('@/types').PluginItem> {
+    return this.request<import('@/types').PluginItem>(`/api/plugins/${pluginId}/disable`, { method: 'POST' });
+  }
+
+  async checkPluginHealth(pluginId: string): Promise<any> {
+    return this.request<any>(`/api/plugins/${pluginId}/health`, { method: 'POST' });
+  }
+
+  async getWebhooks(): Promise<import('@/types').WebhookItem[]> {
+    return this.request<import('@/types').WebhookItem[]>('/api/webhooks');
+  }
+
+  async createWebhook(url: string, events: string[]): Promise<import('@/types').WebhookItem> {
+    return this.request<import('@/types').WebhookItem>('/api/webhooks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, events })
+    });
+  }
+
+  async deleteWebhook(webhookId: string): Promise<any> {
+    return this.request<any>(`/api/webhooks/${webhookId}`, { method: 'DELETE' });
+  }
+
+  async testWebhook(webhookId: string): Promise<any> {
+    return this.request<any>(`/api/webhooks/${webhookId}/test`, { method: 'POST' });
+  }
+
+  async getApiKeys(): Promise<import('@/types').APIKeyItem[]> {
+    return this.request<import('@/types').APIKeyItem[]>('/api/auth/api-keys');
+  }
+
+  async createApiKey(name: string, permissions: string[] = ['CONTENT_READ'], expiresInDays?: number): Promise<any> {
+    return this.request<any>('/api/auth/api-keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, permissions, expires_in_days: expiresInDays })
+    });
+  }
+
+  async revokeApiKey(keyId: string): Promise<any> {
+    return this.request<any>(`/api/auth/api-keys/${keyId}`, { method: 'DELETE' });
+  }
 }
 
 export const api = new ApiClient(API_BASE);
