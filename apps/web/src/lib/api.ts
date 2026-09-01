@@ -1042,6 +1042,21 @@ class ApiClient {
       method: 'POST'
     });
   }
+
+  // Phase 21: Performance, Scalability & Resource Management API Methods
+  async getSystemPerformance(): Promise<any> {
+    return this.request<any>('/api/system/performance');
+  }
+
+  async getStorageBreakdown(): Promise<any> {
+    return this.request<any>('/api/system/storage');
+  }
+
+  async cleanTemporaryStorage(): Promise<{ status: string; message: string; freed_mb: number }> {
+    return this.request<{ status: string; message: string; freed_mb: number }>('/api/system/storage/cleanup', {
+      method: 'POST'
+    });
+  }
 }
 
 export const api = new ApiClient(API_BASE);
