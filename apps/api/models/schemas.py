@@ -1151,3 +1151,34 @@ class GovernanceResultResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class NotificationResponse(BaseModel):
+    id: str
+    type: str
+    title: str
+    message: str
+    severity: str
+    read: bool
+    entity_type: Optional[str] = None
+    entity_id: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class NotificationListResponse(BaseModel):
+    items: List[NotificationResponse]
+    unread_count: int
+
+class GlobalSearchResultItem(BaseModel):
+    id: str
+    type: str  # content, clip, carousel, publication, experiment, automation
+    title: str
+    subtitle: Optional[str] = None
+    url: str
+    status: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+class GlobalSearchResponse(BaseModel):
+    query: str
+    results: List[GlobalSearchResultItem]
+
+
