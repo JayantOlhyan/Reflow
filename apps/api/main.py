@@ -3341,7 +3341,120 @@ async def revoke_api_key(key_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"status": "success", "message": f"API key '{key_id}' revoked successfully."}
 
+# ==============================================================================
+# PHASE 18: ECOSYSTEM & INTEGRATION HUB REST API ENDPOINTS
+# ==============================================================================
+
+from services.ecosystem_service import ecosystem_service
+from models.schemas import (
+    EcosystemPluginItem, EcosystemCatalogResponse, PluginInstallRequest,
+    PluginUpdateRequest, PluginConfigureRequest, PluginAuditLogItem
+)
+
+@app.get("/api/ecosystem/plugins", response_model=EcosystemCatalogResponse, tags=["Ecosystem"])
+async def list_ecosystem_plugins(
+    q: Optional[str] = Query(None, description="Search query"),
+    category: Optional[str] = Query(None, description="Plugin type category filter"),
+    source: Optional[str] = Query(None, description="Source filter (OFFICIAL, COMMUNITY, LOCAL)"),
+    installed_only: bool = Query(False, description="Filter installed plugins only"),
+    updates_only: bool = Query(False, description="Filter available updates only"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists ecosystem catalog plugins with search, filter, and installation status."""
+    items = await ecosystem_service.list_catalog(
+        db, search_query=q, category=category, source_type=source,
+        installed_only=installed_only, updates_only=updates_only
+    )
+    reg_url = getattr(settings, "PLUGIN_REGISTRY_URL", None) or "local://registry/registry.json"
+    return EcosystemCatalogResponse(
+        plugins=[EcosystemPluginItem.model_validate(i) for i in items],
+        total=len(items),
+        registry_url=reg_url,
+        updated_at=datetime.utcnow().isoformat()
+    )
+
+@app.get("/api/ecosystem/plugins/{plugin_id}", response_model=EcosystemPluginItem, tags=["Ecosystem"])
+async def get_ecosystem_plugin_detail(plugin_id: str, db: AsyncSession = Depends(get_db)):
+    """Gets detailed ecosystem catalog metadata for a single plugin."""
+    detail = await ecosystem_service.get_plugin_detail(db, plugin_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_id}' not found in ecosystem catalog.")
+    return EcosystemPluginItem.model_validate(detail)
+
+@app.get("/api/ecosystem/categories", tags=["Ecosystem"])
+async def get_ecosystem_categories():
+    """Gets list of available plugin ecosystem categories."""
+    return {
+        "categories": [
+            {"id": "ALL", "name": "All Categories"},
+            {"id": "PLATFORM", "name": "Social Platforms"},
+            {"id": "AI_PROVIDER", "name": "AI Providers"},
+            {"id": "STORAGE", "name": "Storage Drivers"},
+            {"id": "MEDIA_PROCESSOR", "name": "Media Processors"},
+            {"id": "WORKFLOW_ACTION", "name": "Workflow Actions"},
+            {"id": "ANALYTICS", "name": "Analytics Providers"}
+        ]
+    }
+
+@app.post("/api/ecosystem/refresh", tags=["Ecosystem"])
+async def refresh_ecosystem_catalog():
+    """Forces catalog refresh from static registry or custom PLUGIN_REGISTRY_URL."""
+    cat = await ecosystem_service.fetch_catalog(force_refresh=True)
+    return {"status": "success", "total_plugins": len(cat.get("plugins", [])), "refreshed_at": datetime.utcnow().isoformat()}
+
+@app.post("/api/plugins/install", tags=["Ecosystem"])
+async def install_plugin(req: PluginInstallRequest, db: AsyncSession = Depends(get_db)):
+    """Installs a plugin package with checksum verification, permission consent, and safety checks."""
+    try:
+        res = await ecosystem_service.install_plugin(
+            db, plugin_id=req.plugin_id, version=req.version,
+            source=req.source, accept_permissions=req.accept_permissions
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Installation failed: {e}")
+
+@app.post("/api/plugins/{plugin_id}/update", tags=["Ecosystem"])
+async def update_plugin(plugin_id: str, req: PluginUpdateRequest, db: AsyncSession = Depends(get_db)):
+    """Updates a plugin atomically with automated rollback on health check failure."""
+    try:
+        res = await ecosystem_service.update_plugin(db, plugin_id=plugin_id, confirm=req.confirm)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Update failed: {e}")
+
+@app.post("/api/plugins/{plugin_id}/uninstall", tags=["Ecosystem"])
+async def uninstall_plugin(plugin_id: str, db: AsyncSession = Depends(get_db)):
+    """Safely uninstalls a plugin while preserving user publication content."""
+    try:
+        res = await ecosystem_service.uninstall_plugin(db, plugin_id=plugin_id)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/plugins/{plugin_id}/configure", tags=["Ecosystem"])
+async def configure_plugin(plugin_id: str, req: PluginConfigureRequest, db: AsyncSession = Depends(get_db)):
+    """Configures plugin parameters with secret redaction."""
+    res = await ecosystem_service.configure_plugin(db, plugin_id=plugin_id, config_dict=req.config)
+    return res
+
+@app.get("/api/plugins/{plugin_id}/audit-log", response_model=List[PluginAuditLogItem], tags=["Ecosystem"])
+async def get_plugin_audit_log(plugin_id: str, db: AsyncSession = Depends(get_db)):
+    """Retrieves audit log history for a plugin."""
+    logs = await ecosystem_service.get_audit_logs(db, plugin_id=plugin_id)
+    return [PluginAuditLogItem.model_validate(l) for l in logs]
+
+@app.get("/api/ecosystem/metrics", tags=["Ecosystem"])
+async def get_ecosystem_metrics():
+    """Gets plugin ecosystem system health & operation metrics telemetry."""
+    return ecosystem_service.metrics
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+
 
