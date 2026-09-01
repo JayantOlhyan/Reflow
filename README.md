@@ -8,6 +8,11 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 
 ## Features
 
+- **Unified Content Workspace (`/content/[id]`)**: Single 10-section hub for every content item linking lifecycle timeline, media player, interactive transcript with timestamp jumping, clips, carousels, platform copy, governance, and analytics.
+- **Centralized Approval Center (`/approvals`)**: Single and bulk publication approval with automated governance quality control safeguards.
+- **Publishing Workspace (`/publishing`)**: Tabbed status management (`Draft`, `Scheduled`, `Publishing`, `Published`, `Failed`), post payload inspection, and one-click retry.
+- **Global Search & Command Palette (`Cmd + K`)**: Instant server-side search across Content, Clips, Carousels, Publications, Experiments, and Automations.
+- **Persistent Notification Drawer**: Real-time slide-over panel delivering job completions, governance alerts, and publishing status events.
 - **Automated Video Repurposing**: Ingest long-form videos and automatically generate aspect-ratio variants (`9:16`, `1:1`, `4:5`, `16:9`), speech-to-text transcripts, and structured content briefs.
 - **Intelligent Short-Form Clip Engine**: AI moment discovery with transcript boundary snapping, quality scoring, sub-clipping, and aspect-ratio transcoding.
 - **Dynamic Captions & Subtitles**: Word-level highlight burn-in captions with safe-area layouts for TikTok, Instagram Reels, and YouTube Shorts.
@@ -16,7 +21,7 @@ Reflow is an open-source, self-hosted content operating system for creators and 
 - **UTC Scheduler & Content Calendar**: Independent UTC scheduler daemon with atomic publication claiming and stale-claim recovery.
 - **Content Governance & Quality Control**: Centralized policy engine checking video resolution, brand forbidden terms, duplicate publication windows, and factual claim traceability.
 - **Closed-Loop Automation Engine**: Lifecycle event triggers (`content.ready`, `clip.ready`) executing custom automation pipelines with rate limits and human-in-the-loop approval gates.
-- **Self-Hosted Infrastructure Telemetry**: First-run setup checklist (`/setup`), real CPU/Memory/Disk metrics (`psutil`), non-destructive database backup/restore scripts (`scripts/backup.sh`, `scripts/restore.sh`), and zero fake mock data.
+- **Self-Hosted Infrastructure Telemetry**: First-run 6-step setup checklist (`/setup`), real CPU/Memory/Disk metrics (`psutil`), non-destructive database backup/restore scripts (`scripts/backup.sh`, `scripts/restore.sh`), and zero fake mock data.
 
 ---
 
