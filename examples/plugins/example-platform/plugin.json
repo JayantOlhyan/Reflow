@@ -1,0 +1,16 @@
+{
+  "id": "example-platform-connector",
+  "name": "Example Social Platform (EXAMPLE ONLY)",
+  "version": "1.0.0",
+  "description": "Demonstrates platform plugin contract (EXAMPLE ONLY).",
+  "author": "Reflow Community",
+  "type": "PLATFORM",
+  "entrypoint": "example_platform:ExamplePlatformPlugin",
+  "api_version": "1.0.0",
+  "capabilities": ["video", "image", "text", "scheduling", "analytics"],
+  "permissions": ["PUBLISH", "NETWORK_ACCESS"],
+  "configuration": {
+    "client_id": "string",
+    "client_secret": "string"
+  }
+}
