@@ -9,11 +9,22 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build:
@@ -25,22 +36,37 @@ services:
     volumes:
       - storage_data:/app/storage
     environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow
-      - STORAGE_PROVIDER=local
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-single_user}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-local}
       - STORAGE_DIR=/app/storage
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_MEDIA_QUEUE=reflow:media_jobs
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_MEDIA_QUEUE=${REDIS_MEDIA_QUEUE:-reflow:media_jobs}
       - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-reflow_dev_secret_key_change_in_production_32b}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
       - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
       - YOUTUBE_REDIRECT_URI=${YOUTUBE_REDIRECT_URI:-http://localhost:8000/api/connections/youtube/callback}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   worker:
     build:
@@ -51,23 +77,36 @@ services:
     volumes:
       - storage_data:/app/storage
     environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow
-      - STORAGE_PROVIDER=local
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-single_user}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-local}
       - STORAGE_DIR=/app/storage
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_MEDIA_QUEUE=reflow:media_jobs
-      - MEDIA_WORKER_CONCURRENCY=1
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_MEDIA_QUEUE=${REDIS_MEDIA_QUEUE:-reflow:media_jobs}
+      - MEDIA_WORKER_CONCURRENCY=${MEDIA_WORKER_CONCURRENCY:-1}
       - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-reflow_dev_secret_key_change_in_production_32b}
-      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
-      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
-      - YOUTUBE_REDIRECT_URI=${YOUTUBE_REDIRECT_URI:-http://localhost:8000/api/connections/youtube/callback}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis; r=redis.from_url('${REDIS_URL:-redis://redis:6379/0}'); exit(0 if r.ping() else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   scheduler:
     build:
@@ -78,19 +117,33 @@ services:
     volumes:
       - storage_data:/app/storage
     environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow
-      - STORAGE_PROVIDER=local
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-single_user}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://reflow:reflow_password@postgres:5432/reflow}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-local}
       - STORAGE_DIR=/app/storage
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_MEDIA_QUEUE=reflow:media_jobs
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_MEDIA_QUEUE=${REDIS_MEDIA_QUEUE:-reflow:media_jobs}
       - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-reflow_dev_secret_key_change_in_production_32b}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reflow -d reflow -h postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   postgres:
     image: postgres:16-alpine
@@ -109,6 +162,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
@@ -123,6 +181,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   storage_data:
