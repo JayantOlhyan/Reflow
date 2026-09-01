@@ -23,9 +23,20 @@ class RedactingFormatter(logging.Formatter):
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         service = getattr(record, 'service', 'ReflowAPI')
         msg = sanitize_log_message(record.getMessage())
+        
         req_id = getattr(record, 'request_id', '')
-        req_part = f" [{req_id}]" if req_id else ""
-        return f"[{timestamp}] [{record.levelname:<5}] [{service}]{req_part} {msg}"
+        job_id = getattr(record, 'job_id', '')
+        content_id = getattr(record, 'content_id', '')
+        
+        ids_part = ""
+        if req_id or job_id or content_id:
+            parts = []
+            if req_id: parts.append(f"req:{req_id}")
+            if job_id: parts.append(f"job:{job_id}")
+            if content_id: parts.append(f"content:{content_id}")
+            ids_part = f" [{', '.join(parts)}]"
+            
+        return f"[{timestamp}] [{record.levelname:<5}] [{service}]{ids_part} {msg}"
 
 def get_logger(service_name: str = "ReflowAPI") -> logging.Logger:
     logger = logging.getLogger(service_name)
