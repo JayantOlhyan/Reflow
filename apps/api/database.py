@@ -49,7 +49,7 @@ async def init_db():
         AutomationRule, AutomationExecution, AutomationActionExecution,
         GovernancePolicy, BrandProfile, QualityCheck, ContentClaim, GovernanceOverride, GovernanceResult, Notification,
         PluginConfiguration, WebhookEndpoint, APIKey, PluginInstallation, PluginAuditLog,
-        SystemJob, DeadLetterJob, Incident, IncidentEvent, SystemEvent, AlertRule, HealthHistory, WorkerHeartbeat
+        SystemJob, DeadLetterJob, Incident, IncidentEvent, SystemEvent, AlertRule, HealthHistory, WorkerHeartbeat, IdempotencyRecord
     )
     try:
         async with engine.begin() as conn:
