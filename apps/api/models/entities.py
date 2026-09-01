@@ -941,3 +941,28 @@ class APIKey(Base):
     expires_at = Column(DateTime, nullable=True)
 
 
+class PluginInstallation(Base):
+    __tablename__ = "plugin_installations"
+
+    id = Column(String(64), primary_key=True, index=True)
+    plugin_id = Column(String(128), unique=True, index=True, nullable=False)
+    version = Column(String(32), nullable=False)
+    enabled = Column(Boolean, default=True)
+    source_type = Column(String(32), default="OFFICIAL")
+    config_json = Column(Text, default="{}")
+    health_status = Column(String(32), default="HEALTHY")
+    installed_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PluginAuditLog(Base):
+    __tablename__ = "plugin_audit_logs"
+
+    id = Column(String(64), primary_key=True, index=True)
+    plugin_id = Column(String(128), index=True, nullable=False)
+    action = Column(String(64), nullable=False)
+    details_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
