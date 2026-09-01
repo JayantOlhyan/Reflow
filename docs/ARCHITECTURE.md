@@ -2,7 +2,7 @@
 
 **"Create once. Transform everywhere."**
 
-Reflow is an open-source, self-hosted content operating system for creators and developers. This document describes the system architecture established through Phase 4.
+Reflow is an open-source, self-hosted content operating system for creators and developers. This document describes the system architecture established through Phase 16.
 
 ---
 
