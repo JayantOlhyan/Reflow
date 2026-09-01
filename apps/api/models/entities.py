@@ -965,4 +965,118 @@ class PluginAuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SystemJob(Base):
+    __tablename__ = "system_jobs"
+
+    id = Column(String(64), primary_key=True, index=True)
+    job_type = Column(String(64), index=True, nullable=False)
+    status = Column(String(32), index=True, default="QUEUED") # QUEUED, RUNNING, SUCCEEDED, FAILED, STALE
+    content_id = Column(String(64), index=True, nullable=True)
+    asset_id = Column(String(64), nullable=True)
+    publication_id = Column(String(64), index=True, nullable=True)
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    queued_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    failed_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    error_code = Column(String(64), nullable=True)
+    duration_ms = Column(Float, nullable=True)
+    payload_json = Column(Text, default="{}")
+
+
+class DeadLetterJob(Base):
+    __tablename__ = "dead_letter_jobs"
+
+    id = Column(String(64), primary_key=True, index=True)
+    job_id = Column(String(64), index=True, nullable=False)
+    job_type = Column(String(64), nullable=False)
+    content_id = Column(String(64), nullable=True)
+    publication_id = Column(String(64), nullable=True)
+    attempts = Column(Integer, default=3)
+    last_error = Column(Text, nullable=True)
+    error_code = Column(String(64), nullable=True)
+    dismissed = Column(Boolean, default=False)
+    failed_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+
+    id = Column(String(64), primary_key=True, index=True)
+    title = Column(String(256), nullable=False)
+    severity = Column(String(32), index=True, default="MEDIUM") # INFO, LOW, MEDIUM, HIGH, CRITICAL
+    status = Column(String(32), index=True, default="OPEN") # OPEN, INVESTIGATING, MITIGATED, RESOLVED, CLOSED
+    component = Column(String(64), index=True, nullable=False)
+    error_code = Column(String(64), nullable=True)
+    description = Column(Text, nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    acknowledged_by = Column(String(64), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    affected_resources_json = Column(Text, default="{}")
+
+
+class IncidentEvent(Base):
+    __tablename__ = "incident_events"
+
+    id = Column(String(64), primary_key=True, index=True)
+    incident_id = Column(String(64), index=True, nullable=False)
+    event_type = Column(String(64), nullable=False)
+    description = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SystemEvent(Base):
+    __tablename__ = "system_events"
+
+    id = Column(String(64), primary_key=True, index=True)
+    event_type = Column(String(64), index=True, nullable=False)
+    entity_type = Column(String(64), nullable=True)
+    entity_id = Column(String(64), nullable=True)
+    severity = Column(String(32), default="INFO")
+    payload_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AlertRule(Base):
+    __tablename__ = "alert_rules"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    enabled = Column(Boolean, default=True)
+    condition_type = Column(String(64), nullable=False)
+    threshold_value = Column(Float, default=1.0)
+    severity = Column(String(32), default="HIGH")
+    cooldown_minutes = Column(Integer, default=15)
+    last_triggered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HealthHistory(Base):
+    __tablename__ = "health_history"
+
+    id = Column(String(64), primary_key=True, index=True)
+    component = Column(String(64), index=True, nullable=False)
+    status = Column(String(32), nullable=False) # HEALTHY, DEGRADED, UNHEALTHY, UNKNOWN
+    details = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    id = Column(String(64), primary_key=True, index=True)
+    worker_id = Column(String(64), unique=True, index=True, nullable=False)
+    worker_type = Column(String(64), default="MEDIA_WORKER")
+    status = Column(String(32), default="RUNNING")
+    jobs_processed = Column(Integer, default=0)
+    jobs_failed = Column(Integer, default=0)
+    current_job_id = Column(String(64), nullable=True)
+    last_heartbeat = Column(DateTime, default=datetime.utcnow)
+
+
+
 
