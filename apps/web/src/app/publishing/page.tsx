@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Layers, Search, RefreshCw, ExternalLink, RotateCcw, AlertTriangle, CheckCircle, Clock, XCircle, FileText } from 'lucide-react';
 import { PublicationItem } from '@/types';
 import { api } from '@/lib/api';
 
-export default function PublishingWorkspacePage() {
+function PublishingContent() {
   const searchParams = useSearchParams();
   const highlightId = searchParams?.get('id');
 
@@ -299,5 +299,13 @@ export default function PublishingWorkspacePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function PublishingWorkspacePage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Loading publishing workspace...</div>}>
+      <PublishingContent />
+    </Suspense>
   );
 }
