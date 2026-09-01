@@ -44,6 +44,7 @@ export const Sidebar: React.FC = () => {
 
   const systemNavItems = [
     { name: 'Setup', href: '/setup', icon: ShieldCheck },
+    { name: 'Incidents', href: '/system/incidents', icon: ShieldCheck },
     { name: 'Logs', href: '/system?tab=logs', icon: FileText },
     { name: 'Jobs', href: '/system?tab=jobs', icon: Layers },
     { name: 'Health', href: '/system?tab=health', icon: Activity, badge: 'healthy' },
