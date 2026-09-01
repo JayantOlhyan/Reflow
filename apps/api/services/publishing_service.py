@@ -330,6 +330,17 @@ class PublishingService:
                 publication.error_message = None
                 publication.updated_at = datetime.utcnow()
                 await session.commit()
+
+                from services.notification_service import notification_service
+                await notification_service.create_notification(
+                    notification_type="PUBLICATION_SUCCESS",
+                    title="Publication Success",
+                    message=f"Post published successfully to {publication.platform.upper()}.",
+                    severity="SUCCESS",
+                    entity_type="publication",
+                    entity_id=publication.id
+                )
+
                 logger.info(f"Publication {publication_id} on {publication.platform} succeeded -> {publication.external_url}")
                 return result
 
@@ -339,6 +350,16 @@ class PublishingService:
                 publication.error_message = str(e)
                 publication.updated_at = datetime.utcnow()
                 await session.commit()
+
+                from services.notification_service import notification_service
+                await notification_service.create_notification(
+                    notification_type="CONNECTION_EXPIRED",
+                    title="Platform Connection Error",
+                    message=f"Re-authorization required for {publication.platform.upper()}.",
+                    severity="WARNING",
+                    entity_type="publication",
+                    entity_id=publication.id
+                )
                 raise
             except ResourceWarning as e:
                 publication.status = "FAILED"
@@ -346,6 +367,16 @@ class PublishingService:
                 publication.error_message = str(e)
                 publication.updated_at = datetime.utcnow()
                 await session.commit()
+
+                from services.notification_service import notification_service
+                await notification_service.create_notification(
+                    notification_type="PUBLICATION_FAILED",
+                    title="Publishing Rate Limited",
+                    message=f"Rate limit reached on {publication.platform.upper()}.",
+                    severity="ERROR",
+                    entity_type="publication",
+                    entity_id=publication.id
+                )
                 raise
             except NotImplementedError as e:
                 publication.status = "FAILED"
@@ -358,6 +389,18 @@ class PublishingService:
                 publication.status = "FAILED"
                 publication.error_code = "PLATFORM_ERROR"
                 publication.error_message = str(e)
+                publication.updated_at = datetime.utcnow()
+                await session.commit()
+
+                from services.notification_service import notification_service
+                await notification_service.create_notification(
+                    notification_type="PUBLICATION_FAILED",
+                    title="Publishing Failed",
+                    message=f"Failed to publish to {publication.platform.upper()}: {str(e)[:100]}",
+                    severity="ERROR",
+                    entity_type="publication",
+                    entity_id=publication.id
+                )
                 publication.updated_at = datetime.utcnow()
                 await session.commit()
                 raise
