@@ -3,7 +3,8 @@ import os
 import io
 import json
 import uuid
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form, Query, status, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,6 +77,8 @@ logger = get_logger("ReflowAPI")
 async def lifespan(app: FastAPI):
     logger.info("Reflow API starting up... Initializing database schema.")
     await init_db()
+    from plugins.loader import register_builtin_plugins
+    register_builtin_plugins()
     yield
     logger.info("Reflow API shutting down.")
 
@@ -3121,6 +3124,222 @@ async def get_carousel_detail(carousel_id: str, db: AsyncSession = Depends(get_d
     if not car:
         raise HTTPException(status_code=404, detail="Carousel not found.")
     return CarouselResponse.model_validate(car)
+
+# ==============================================================================
+# PHASE 17: EXTENSIBILITY, PLUGINS, WEBHOOKS & API KEYS
+# ==============================================================================
+
+from plugins.registry import plugin_registry
+from plugins.manifest import PluginType
+from models.entities import PluginConfiguration, WebhookEndpoint, APIKey
+from models.schemas import (
+    PluginListResponse, PluginSchema, WebhookResponse, WebhookCreateRequest,
+    APIKeyCreateRequest, APIKeyCreatedResponse, APIKeyResponse
+)
+from services.webhook_service import webhook_service
+import hashlib
+
+@app.get("/api/plugins", response_model=PluginListResponse, tags=["Plugins"])
+async def list_plugins(type: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    """Lists registered plugins and their capabilities, status, and health."""
+    ptype = PluginType(type.upper()) if type and hasattr(PluginType, type.upper()) else None
+    plugins = plugin_registry.list_plugins(plugin_type=ptype, include_disabled=True)
+    return PluginListResponse(plugins=[PluginSchema.model_validate(p) for p in plugins], total=len(plugins))
+
+@app.get("/api/plugins/{plugin_id}", response_model=PluginSchema, tags=["Plugins"])
+async def get_plugin_detail(plugin_id: str):
+    """Fetches details, capabilities, permissions, and status of a specific plugin."""
+    plugins = plugin_registry.list_plugins(include_disabled=True)
+    match = next((p for p in plugins if p["id"] == plugin_id), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Plugin not found.")
+    return PluginSchema.model_validate(match)
+
+@app.post("/api/plugins/{plugin_id}/enable", response_model=PluginSchema, tags=["Plugins"])
+async def enable_plugin(plugin_id: str, db: AsyncSession = Depends(get_db)):
+    """Enables an installed plugin."""
+    success = plugin_registry.enable_plugin(plugin_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Plugin not found.")
+    
+    # Sync DB state
+    res = await db.execute(select(PluginConfiguration).where(PluginConfiguration.plugin_id == plugin_id))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = PluginConfiguration(id=f"pcfg_{uuid.uuid4().hex[:8]}", plugin_id=plugin_id, enabled=True)
+        db.add(cfg)
+    else:
+        cfg.enabled = True
+        cfg.updated_at = datetime.utcnow()
+    await db.commit()
+
+    return await get_plugin_detail(plugin_id)
+
+@app.post("/api/plugins/{plugin_id}/disable", response_model=PluginSchema, tags=["Plugins"])
+async def disable_plugin(plugin_id: str, db: AsyncSession = Depends(get_db)):
+    """Disables a plugin."""
+    success = plugin_registry.disable_plugin(plugin_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Plugin not found.")
+
+    res = await db.execute(select(PluginConfiguration).where(PluginConfiguration.plugin_id == plugin_id))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = PluginConfiguration(id=f"pcfg_{uuid.uuid4().hex[:8]}", plugin_id=plugin_id, enabled=False)
+        db.add(cfg)
+    else:
+        cfg.enabled = False
+        cfg.updated_at = datetime.utcnow()
+    await db.commit()
+
+    return await get_plugin_detail(plugin_id)
+
+@app.post("/api/plugins/{plugin_id}/health", tags=["Plugins"])
+async def check_plugin_health(plugin_id: str):
+    """Executes isolated health check on a specific plugin."""
+    return await plugin_registry.health_check(plugin_id)
+
+# ------------------------------------------------------------------------------
+# Webhooks API
+# ------------------------------------------------------------------------------
+
+@app.get("/api/webhooks", response_model=List[WebhookResponse], tags=["Webhooks"])
+async def list_webhooks(db: AsyncSession = Depends(get_db)):
+    """Lists registered outbound webhook endpoints."""
+    res = await db.execute(select(WebhookEndpoint).order_by(WebhookEndpoint.created_at.desc()))
+    endpoints = res.scalars().all()
+    results = []
+    for ep in endpoints:
+        results.append(WebhookResponse(
+            id=ep.id,
+            url=ep.url,
+            events=json.loads(ep.events_json or "[]"),
+            enabled=ep.enabled,
+            last_success_at=ep.last_success_at,
+            last_failure_at=ep.last_failure_at,
+            created_at=ep.created_at
+        ))
+    return results
+
+@app.post("/api/webhooks", response_model=WebhookResponse, tags=["Webhooks"])
+async def create_webhook(req: WebhookCreateRequest, db: AsyncSession = Depends(get_db)):
+    """Registers a new outbound webhook endpoint with generated HMAC secret."""
+    if not req.url.startswith("http://") and not req.url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid webhook URL. Must start with http:// or https://")
+
+    webhook_id = f"wh_{uuid.uuid4().hex[:10]}"
+    secret = f"whsec_{uuid.uuid4().hex}"
+    
+    ep = WebhookEndpoint(
+        id=webhook_id,
+        url=req.url,
+        events_json=json.dumps(req.events or ["content.ready", "publication.succeeded"]),
+        enabled=True,
+        secret=secret,
+        created_at=datetime.utcnow()
+    )
+    db.add(ep)
+    await db.commit()
+
+    return WebhookResponse(
+        id=ep.id,
+        url=ep.url,
+        events=json.loads(ep.events_json),
+        enabled=ep.enabled,
+        last_success_at=None,
+        last_failure_at=None,
+        created_at=ep.created_at
+    )
+
+@app.delete("/api/webhooks/{webhook_id}", tags=["Webhooks"])
+async def delete_webhook(webhook_id: str, db: AsyncSession = Depends(get_db)):
+    """Deletes a webhook endpoint."""
+    res = await db.execute(select(WebhookEndpoint).where(WebhookEndpoint.id == webhook_id))
+    ep = res.scalar_one_or_none()
+    if not ep:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found.")
+    await db.delete(ep)
+    await db.commit()
+    return {"status": "success", "message": f"Webhook endpoint '{webhook_id}' deleted."}
+
+@app.post("/api/webhooks/{webhook_id}/test", tags=["Webhooks"])
+async def test_webhook(webhook_id: str, db: AsyncSession = Depends(get_db)):
+    """Triggers a test signed payload to verify endpoint connectivity."""
+    res = await db.execute(select(WebhookEndpoint).where(WebhookEndpoint.id == webhook_id))
+    ep = res.scalar_one_or_none()
+    if not ep:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found.")
+
+    test_data = {"test": True, "ping": "pong", "triggered_at": datetime.utcnow().isoformat()}
+    delivered = await webhook_service._deliver_payload(ep.id, ep.url, webhook_service.compute_signature(ep.secret, int(time.time()), json.dumps(test_data).encode("utf-8")), json.dumps(test_data).encode("utf-8"))
+    return {"status": "success" if delivered else "failed", "delivered": delivered, "url": ep.url}
+
+# ------------------------------------------------------------------------------
+# API Keys Authorization API
+# ------------------------------------------------------------------------------
+
+@app.post("/api/auth/api-keys", response_model=APIKeyCreatedResponse, tags=["Auth"])
+async def create_api_key(req: APIKeyCreateRequest, db: AsyncSession = Depends(get_db)):
+    """Creates a new API key. The raw key is returned ONCE and never stored plain in DB."""
+    key_id = f"key_{uuid.uuid4().hex[:10]}"
+    prefix = "reflow_live_"
+    raw_secret = f"{prefix}{uuid.uuid4().hex}{uuid.uuid4().hex}"
+    hashed_key = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
+
+    expires_at = None
+    if req.expires_in_days:
+        expires_at = datetime.utcnow() + timedelta(days=req.expires_in_days)
+
+    key_obj = APIKey(
+        id=key_id,
+        name=req.name,
+        prefix=prefix,
+        hashed_key=hashed_key,
+        permissions_json=json.dumps(req.permissions or ["CONTENT_READ"]),
+        created_at=datetime.utcnow(),
+        expires_at=expires_at
+    )
+    db.add(key_obj)
+    await db.commit()
+
+    return APIKeyCreatedResponse(
+        id=key_obj.id,
+        name=key_obj.name,
+        prefix=prefix,
+        raw_api_key=raw_secret,
+        permissions=json.loads(key_obj.permissions_json),
+        created_at=key_obj.created_at,
+        expires_at=key_obj.expires_at
+    )
+
+@app.get("/api/auth/api-keys", response_model=List[APIKeyResponse], tags=["Auth"])
+async def list_api_keys(db: AsyncSession = Depends(get_db)):
+    """Lists registered API keys with masked secrets."""
+    res = await db.execute(select(APIKey).order_by(APIKey.created_at.desc()))
+    keys = res.scalars().all()
+    results = []
+    for k in keys:
+        results.append(APIKeyResponse(
+            id=k.id,
+            name=k.name,
+            prefix=k.prefix,
+            permissions=json.loads(k.permissions_json or "[]"),
+            created_at=k.created_at,
+            last_used_at=k.last_used_at,
+            expires_at=k.expires_at
+        ))
+    return results
+
+@app.delete("/api/auth/api-keys/{key_id}", tags=["Auth"])
+async def revoke_api_key(key_id: str, db: AsyncSession = Depends(get_db)):
+    """Revokes an API key."""
+    res = await db.execute(select(APIKey).where(APIKey.id == key_id))
+    k = res.scalar_one_or_none()
+    if not k:
+        raise HTTPException(status_code=404, detail="API key not found.")
+    await db.delete(k)
+    await db.commit()
+    return {"status": "success", "message": f"API key '{key_id}' revoked successfully."}
 
 if __name__ == "__main__":
     import uvicorn
