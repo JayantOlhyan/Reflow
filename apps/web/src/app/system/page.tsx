@@ -61,6 +61,9 @@ function SystemContent() {
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [logs, setLogs] = useState<SystemLog[]>([]);
+  const [performanceData, setPerformanceData] = useState<any>(null);
+  const [storageBreakdown, setStorageBreakdown] = useState<any>(null);
+  const [cleaningStorage, setCleaningStorage] = useState<boolean>(false);
 
   const loadSystemData = async () => {
     try {
@@ -69,6 +72,10 @@ function SystemContent() {
       setHealthData(health);
       const metricsData = await api.getSystemMetrics().catch(() => null);
       setMetrics(metricsData);
+      const perfData = await api.getSystemPerformance().catch(() => null);
+      setPerformanceData(perfData);
+      const storageData = await api.getStorageBreakdown().catch(() => null);
+      setStorageBreakdown(storageData);
       const failedJobs = await api.getFailedJobs().catch(() => []);
       setDlqJobs(failedJobs);
       const incList = await api.getIncidents({ status: 'OPEN' }).catch(() => []);
@@ -81,6 +88,19 @@ function SystemContent() {
       console.warn("Failed to load system telemetry:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCleanStorage = async () => {
+    setCleaningStorage(true);
+    try {
+      const res = await api.cleanTemporaryStorage();
+      alert(`Cleaned up ${res.message || 'temporary files'}. Freed ${res.freed_mb} MB.`);
+      await loadSystemData();
+    } catch (err: any) {
+      alert(`Storage cleanup failed: ${err.message || err}`);
+    } finally {
+      setCleaningStorage(false);
     }
   };
 
