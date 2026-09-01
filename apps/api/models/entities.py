@@ -1090,6 +1090,18 @@ class IdempotencyRecord(Base):
     expires_at = Column(DateTime, nullable=True)
 
 
+class TmpFileRecord(Base):
+    __tablename__ = "tmp_file_records"
+
+    id = Column(String(64), primary_key=True, index=True)
+    file_path = Column(String(512), unique=True, index=True, nullable=False)
+    owner = Column(String(64), default="system")
+    file_size = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
+
 
 
 
