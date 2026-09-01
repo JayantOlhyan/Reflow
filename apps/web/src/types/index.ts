@@ -803,4 +803,39 @@ export interface SearchResultItem {
   created_at?: string;
 }
 
+export interface PluginItem {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  type: string;
+  api_version: string;
+  capabilities: string[];
+  permissions: string[];
+  enabled: boolean;
+  status: 'HEALTHY' | 'FAILED' | 'DISABLED';
+  error?: string | null;
+}
+
+export interface WebhookItem {
+  id: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+  created_at: string;
+}
+
+export interface APIKeyItem {
+  id: string;
+  name: string;
+  prefix: string;
+  permissions: string[];
+  created_at: string;
+  last_used_at?: string | null;
+  expires_at?: string | null;
+}
+
 
