@@ -8,13 +8,18 @@ TEMPLATE_MANIFEST = {
     "name": "{plugin_name}",
     "version": "1.0.0",
     "description": "Custom {plugin_type} plugin for Reflow.",
-    "author": "Developer",
+    "author": "Developer Name",
+    "repository": "https://github.com/developer/{plugin_id}",
+    "license": "MIT",
     "type": "{plugin_type_upper}",
     "entrypoint": "plugin:CustomPlugin",
     "api_version": "1.0.0",
+    "reflow_version": ">=1.0.0",
     "capabilities": ["custom_action"],
     "permissions": ["NETWORK_ACCESS"],
-    "configuration": {{}}
+    "configuration_schema": {
+        "api_key": {"type": "string", "is_secret": True, "required": True, "description": "API Key for service access"}
+    }
 }
 
 TEMPLATE_CODE = """# Reflow Plugin Entrypoint
@@ -37,12 +42,47 @@ class CustomPlugin(BasePlugin):
         return {{"status": "ok", "plugin": self.manifest.id}}
 """
 
+TEMPLATE_TEST = """# Reflow Plugin Unit Tests
+import pytest
+from plugin import CustomPlugin
+from plugins.manifest import PluginManifest
+
+@pytest.mark.asyncio
+async def test_custom_plugin_health():
+    manifest = PluginManifest(
+        id="{plugin_id}",
+        name="{plugin_name}",
+        version="1.0.0",
+        description="Test manifest",
+        type="{plugin_type_upper}",
+        entrypoint="plugin:CustomPlugin",
+        api_version="1.0.0"
+    )
+    plugin = CustomPlugin(manifest)
+    res = await plugin.health_check()
+    assert res["status"] == "ok"
+"""
+
 TEMPLATE_README = """# {plugin_name} (Reflow Plugin)
 
 Custom Reflow plugin of type `{plugin_type_upper}`.
 
-## Installation
-Place this directory inside `./plugins/` or register via `PluginRegistry`.
+## 1. Overview
+This plugin extends Reflow with custom `{plugin_type_upper}` functionality.
+
+## 2. Declared Permissions
+- `NETWORK_ACCESS`
+
+## 3. Configuration
+Set `api_key` in Reflow Ecosystem settings.
+
+## 4. Installation
+Install locally via Reflow Ecosystem Hub UI (`/ecosystem`) or copy to `./plugins/{plugin_id}`.
+
+## 5. Development & Testing
+```bash
+python3 -m pytest test_plugin.py
+```
 """
 
 def main():
@@ -72,8 +112,11 @@ def main():
     with open(os.path.join(target_dir, "plugin.py"), "w") as f:
         f.write(TEMPLATE_CODE.format(plugin_name=plugin_name))
 
+    with open(os.path.join(target_dir, "test_plugin.py"), "w") as f:
+        f.write(TEMPLATE_TEST.format(plugin_id=plugin_id, plugin_name=plugin_name, plugin_type_upper=plugin_type_upper))
+
     with open(os.path.join(target_dir, "README.md"), "w") as f:
-        f.write(TEMPLATE_README.format(plugin_name=plugin_name, plugin_type_upper=plugin_type_upper))
+        f.write(TEMPLATE_README.format(plugin_name=plugin_name, plugin_type=plugin_type, plugin_type_upper=plugin_type_upper, plugin_id=plugin_id))
 
     print(f"✅ Successfully created starter plugin template at: {target_dir}")
 
