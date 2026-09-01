@@ -98,7 +98,7 @@ export default function SetupPage() {
         return item;
       }));
 
-      const isReady = readyRes.ready;
+      const isReady = readyRes.status === 'healthy';
       setOverallStatus(isReady ? 'READY' : 'ACTION REQUIRED');
     } catch (e) {
       console.warn("Failed to check readiness:", e);
