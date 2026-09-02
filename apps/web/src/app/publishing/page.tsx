@@ -257,14 +257,31 @@ function PublishingContent() {
               )}
 
               {selectedPub.error_message && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 space-y-1">
-                  <div className="font-semibold flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
-                    <span>Error Code: {selectedPub.error_code}</span>
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 space-y-1.5">
+                  <div className="font-bold text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Failure Explanation ({selectedPub.error_code || 'PUBLISH_ERROR'})</span>
                   </div>
-                  <p className="text-[11px] leading-relaxed">{selectedPub.error_message}</p>
+                  <div className="text-xs leading-relaxed">{selectedPub.error_message}</div>
                 </div>
               )}
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button onClick={() => setSelectedPub(null)} className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white rounded-xl">
+                  Close
+                </button>
+                {(selectedPub.status === 'FAILED' || selectedPub.status === 'REAUTH_REQUIRED') && (
+                  <button
+                    onClick={() => handleRetry(selectedPub.id)}
+                    disabled={isRetrying}
+                    className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl transition shadow-lg shadow-rose-600/20"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{isRetrying ? 'Retrying...' : 'Retry Publication'}</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex justify-between items-center pt-4 border-t border-slate-800">
