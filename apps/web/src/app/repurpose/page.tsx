@@ -33,7 +33,8 @@ import {
   AlertTriangle,
   X,
   Lock,
-  Share2
+  Share2,
+  ChevronRight
 } from 'lucide-react';
 import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon, FacebookIcon } from '@/components/ui/SocialIcons';
 import { 
@@ -501,6 +502,29 @@ function RepurposeContent() {
 
   return (
     <div className="space-y-6 animate-fadeIn pb-16">
+      {/* Step-by-Step Creation Wizard Indicator */}
+      <div className="bg-[#11141D] border border-[#1F2937] rounded-2xl p-4 flex items-center justify-between overflow-x-auto text-xs font-semibold">
+        <div className={`flex items-center gap-2 ${content ? 'text-emerald-400' : 'text-indigo-400'}`}>
+          <CheckCircle2 className="w-4 h-4" />
+          <span>1. Select Source ({content ? content.title : 'None Selected'})</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className={`flex items-center gap-2 ${mainStudioTab ? 'text-emerald-400' : 'text-gray-500'}`}>
+          <CheckCircle2 className="w-4 h-4" />
+          <span>2. Choose Format ({mainStudioTab === 'copy' ? 'Platform Copy' : 'Vertical Clips'})</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className={`flex items-center gap-2 ${brief ? 'text-emerald-400' : 'text-gray-500'}`}>
+          {brief ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+          <span>3. Review AI Suggestions ({clipsList.length} Candidates)</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className="flex items-center gap-2 text-indigo-400">
+          <Send className="w-4 h-4" />
+          <span>4. Render & Schedule</span>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
