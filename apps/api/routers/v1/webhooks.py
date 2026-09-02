@@ -28,6 +28,14 @@ async def create_webhook(
     api_key: APIKey = Depends(require_api_key_scopes("WEBHOOK_WRITE"))
 ):
     """Subscribes an HTTPS webhook endpoint to event triggers."""
+    from utils.security import is_safe_external_url
+    is_safe, err = is_safe_external_url(req.url)
+    if not is_safe:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "SSRF_SECURITY_VIOLATION", "message": f"Webhook URL rejected: {err}"}
+        )
+
     endpoint, raw_secret = await webhook_service.create_endpoint(
         db, url=req.url, events=req.events
     )
