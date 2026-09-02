@@ -68,7 +68,7 @@ function ContentWorkspaceContent() {
 
     } catch (err: any) {
       setError(err.message || "Failed to load content workspace");
-    } fontally: {
+    } finally {
       setLoading(false);
     }
   };
@@ -134,6 +134,34 @@ function ContentWorkspaceContent() {
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Sync</span>
           </button>
+        </div>
+      </div>
+
+      {/* Visual Content Lifecycle Progress Header */}
+      <div className="bg-[#11141D] border border-[#1F2937] rounded-2xl p-4 flex items-center justify-between overflow-x-auto text-xs font-semibold">
+        <div className="flex items-center gap-2 text-emerald-400">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>1. Imported</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className={`flex items-center gap-2 ${primaryBrief ? 'text-emerald-400' : 'text-gray-500'}`}>
+          {primaryBrief ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+          <span>2. AI Analyzed</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className={`flex items-center gap-2 ${(clips.length > 0 || carousels.length > 0) ? 'text-emerald-400' : 'text-gray-500'}`}>
+          {(clips.length > 0 || carousels.length > 0) ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+          <span>3. Repurposed ({clips.length} Clips, {carousels.length} Decks)</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className={`flex items-center gap-2 ${publications.some(p => p.status === 'SCHEDULED') ? 'text-indigo-400' : 'text-gray-500'}`}>
+          <Calendar className="w-4 h-4" />
+          <span>4. Scheduled</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-gray-600" />
+        <div className={`flex items-center gap-2 ${publications.some(p => p.status === 'PUBLISHED') ? 'text-emerald-400' : 'text-gray-500'}`}>
+          <ExternalLink className="w-4 h-4" />
+          <span>5. Published</span>
         </div>
       </div>
 
