@@ -18,6 +18,17 @@ def sanitize_log_message(message: str) -> str:
         sanitized = pattern.sub(replacement, sanitized)
     return sanitized
 
+def redact_sensitive_dict(data: dict) -> dict:
+    """Redacts authorization headers and key dictionary fields."""
+    redacted = {}
+    for k, v in data.items():
+        lk = str(k).lower()
+        if any(sec in lk for sec in ["authorization", "api-key", "apikey", "secret", "token", "password"]):
+            redacted[k] = "[REDACTED]"
+        else:
+            redacted[k] = v
+    return redacted
+
 class RedactingFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
