@@ -141,6 +141,10 @@ async def request_tracing_and_rate_limit_middleware(request: Request, call_next)
 
     response = await call_next(request)
     response.headers["X-Request-ID"] = req_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     return response
 
 # Centralized Error Handlers
