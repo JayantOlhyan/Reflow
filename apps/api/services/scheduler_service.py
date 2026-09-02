@@ -231,22 +231,29 @@ class SchedulerService:
             if not candidate_ids:
                 return []
 
-            # Atomically claim candidate IDs
-            claim_stmt = (
-                update(Publication)
-                .where(
-                    Publication.id.in_(candidate_ids),
-                    Publication.status == "SCHEDULED"
+            # Atomically claim candidates checking claimed_at condition
+            claimed_ids = []
+            for pub_id in candidate_ids:
+                claim_stmt = (
+                    update(Publication)
+                    .where(
+                        Publication.id == pub_id,
+                        Publication.status == "SCHEDULED",
+                        or_(
+                            Publication.claimed_at == None,
+                            Publication.claimed_at < lease_threshold
+                        )
+                    )
+                    .values(
+                        claimed_at=now_utc,
+                        claim_owner=self.instance_id,
+                        updated_at=now_utc
+                    )
                 )
-                .values(
-                    claimed_at=now_utc,
-                    claim_owner=self.instance_id,
-                    updated_at=now_utc
-                )
-            )
-            await session.execute(claim_stmt)
+                res_claim = await session.execute(claim_stmt)
+                if res_claim.rowcount > 0:
+                    claimed_ids.append(pub_id)
             await session.commit()
-            claimed_ids = list(candidate_ids)
 
         if claimed_ids:
             logger.info(f"Scheduler '{self.instance_id}' atomically claimed {len(claimed_ids)} due publication(s).")
