@@ -106,6 +106,12 @@ function SystemContent() {
 
   useEffect(() => {
     loadSystemData();
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        loadSystemData();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleRetryJob = async (jobId: string) => {
