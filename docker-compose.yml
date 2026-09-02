@@ -153,7 +153,7 @@ services:
       - POSTGRES_PASSWORD=reflow_password
       - POSTGRES_DB=reflow
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -172,7 +172,7 @@ services:
     image: redis:7-alpine
     container_name: reflow_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
