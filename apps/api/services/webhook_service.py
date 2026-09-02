@@ -68,6 +68,13 @@ class WebhookService:
 
     async def _deliver_payload(self, endpoint_id: str, url: str, signature: str, payload_bytes: bytes, max_retries: int = 3) -> bool:
         """Delivers signed webhook payload with exponential backoff retries."""
+        from utils.security import is_safe_external_url
+        is_safe, err = is_safe_external_url(url)
+        if not is_safe:
+            logger.error(f"Webhook delivery blocked by SSRF security check for {url}: {err}")
+            await self._update_endpoint_status(endpoint_id, success=False)
+            return False
+
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "Reflow-Webhook/1.0",
