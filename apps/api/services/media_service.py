@@ -89,6 +89,12 @@ class MediaService:
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             if proc.returncode != 0:
+                output_file = cmd[-1]
+                if isinstance(output_file, str) and os.path.exists(output_file) and not os.path.isdir(output_file):
+                    try:
+                        os.remove(output_file)
+                    except Exception:
+                        pass
                 raise ValueError(f"FFmpeg execution failed: {stderr.decode(errors='ignore').strip()}")
             return stdout, stderr
         except asyncio.TimeoutError:
@@ -96,6 +102,12 @@ class MediaService:
                 proc.kill()
             except Exception:
                 pass
+            output_file = cmd[-1]
+            if isinstance(output_file, str) and os.path.exists(output_file) and not os.path.isdir(output_file):
+                try:
+                    os.remove(output_file)
+                except Exception:
+                    pass
             raise TimeoutError(f"FFmpeg command timed out after {timeout} seconds.")
 
     async def extract_audio(self, input_path: str, output_path: str) -> str:
