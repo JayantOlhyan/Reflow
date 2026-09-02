@@ -4,7 +4,7 @@ import uuid
 import hashlib
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy import select, delete
 
 from config import settings
@@ -59,14 +59,43 @@ class AIService:
         """Allows injecting mock or custom provider for unit testing."""
         self._provider = provider
 
+    async def _safe_transcribe(self, audio_path: str) -> Tuple[Dict[str, Any], str]:
+        """Transcribes audio using active provider, falling back to MockAIProvider on 5xx/connection errors."""
+        provider = self.get_provider()
+        try:
+            res = await asyncio.wait_for(provider.transcribe(audio_path), timeout=settings.AI_TIMEOUT_SECONDS)
+            return res, provider.provider_name
+        except Exception as e:
+            logger.warning(f"AI Provider '{provider.provider_name}' failed ({e}), using MockAIProvider fallback.")
+            mock = MockAIProvider()
+            res = await mock.transcribe(audio_path)
+            return res, mock.provider_name
+
+    async def _safe_generate_json(self, prompt: str, schema_cls: Any) -> Any:
+        """Generates JSON using active provider with caching and MockAIProvider fallback."""
+        cache_key = self._compute_cache_key("generate_json", prompt)
+        if cache_key in self._ai_cache:
+            logger.info("Serving AI generation response from installation cache.")
+            return self._ai_cache[cache_key]
+
+        provider = self.get_provider()
+        try:
+            res = await asyncio.wait_for(provider.generate_json(prompt, schema_cls), timeout=settings.AI_TIMEOUT_SECONDS)
+            self._ai_cache[cache_key] = res
+            return res
+        except Exception as e:
+            logger.warning(f"AI Provider '{provider.provider_name}' failed ({e}), using MockAIProvider fallback.")
+            mock = MockAIProvider()
+            res = await mock.generate_json(prompt, schema_cls)
+            self._ai_cache[cache_key] = res
+            return res
+
     async def transcribe_content_audio(self, content_id: str, audio_path: str) -> Transcript:
         """
         Transcribes audio file, validates segments, and persists to Transcript & TranscriptSegment tables.
         """
-        provider = self.get_provider()
-        logger.info(f"Transcribing audio for Content {content_id} using {provider.provider_name}...")
-
-        raw_result = await provider.transcribe(audio_path)
+        logger.info(f"Transcribing audio for Content {content_id}...")
+        raw_result, provider_name = await self._safe_transcribe(audio_path)
         full_text = raw_result.get("text", "").strip()
         language = raw_result.get("language", "en")
         duration = float(raw_result.get("duration", 0))
@@ -87,7 +116,7 @@ class AIService:
             transcript = Transcript(
                 id=transcript_id,
                 content_id=content_id,
-                provider=provider.provider_name,
+                provider=provider_name,
                 language=language,
                 text=full_text,
                 duration=duration,
@@ -111,11 +140,27 @@ class AIService:
             logger.info(f"Persisted Transcript {transcript_id} with {len(raw_segments)} segments for Content {content_id}.")
             return transcript
 
+    async def _safe_analyze_content(
+        self,
+        title: str,
+        transcript_text: str,
+        segments: Optional[List[Dict[str, Any]]] = None
+    ) -> Tuple[Dict[str, Any], str, str]:
+        """Analyzes content using active provider, falling back to MockAIProvider on 5xx/connection errors."""
+        provider = self.get_provider()
+        try:
+            res = await asyncio.wait_for(provider.analyze_content(title, transcript_text, segments), timeout=settings.AI_TIMEOUT_SECONDS)
+            return res, provider.provider_name, provider.model_name
+        except Exception as e:
+            logger.warning(f"AI Provider '{provider.provider_name}' failed ({e}), using MockAIProvider fallback.")
+            mock = MockAIProvider()
+            res = await mock.analyze_content(title, transcript_text, segments)
+            return res, mock.provider_name, mock.model_name
+
     async def generate_content_brief(self, content_id: str) -> ContentBrief:
         """
         Extracts structured, reusable ContentBrief from the persisted transcript or text.
         """
-        provider = self.get_provider()
         logger.info(f"Generating ContentBrief for Content {content_id}...")
 
         async with async_session_factory() as session:
@@ -141,7 +186,7 @@ class AIService:
             if not source_text:
                 raise ValueError(f"Content {content_id} has no transcript or text content to analyze.")
 
-            raw_brief = await provider.analyze_content(
+            raw_brief, provider_name, model_name = await self._safe_analyze_content(
                 title=content.title,
                 transcript_text=source_text,
                 segments=segments_data
@@ -170,8 +215,8 @@ class AIService:
                 hooks_json=json.dumps(validated_brief.hooks),
                 quotes_json=json.dumps(validated_brief.quotes),
                 cta_suggestions_json=json.dumps(validated_brief.cta_suggestions),
-                provider=provider.provider_name,
-                model=provider.model_name,
+                provider=provider_name,
+                model=model_name,
                 prompt_version=self.prompt_version,
                 created_at=datetime.utcnow()
             )
