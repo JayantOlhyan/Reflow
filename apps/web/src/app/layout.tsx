@@ -6,6 +6,11 @@ import { Header } from "@/components/layout/Header";
 export const metadata: Metadata = {
   title: "Reflow — Create once. Transform everywhere.",
   description: "Open-source, self-hosted content repurposing and multi-platform distribution operating system.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
