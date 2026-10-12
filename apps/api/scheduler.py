@@ -21,6 +21,7 @@ async def run_scheduler():
     last_analytics_sweep = datetime.utcnow() - timedelta(minutes=settings.ANALYTICS_SYNC_INTERVAL_MINUTES)
     last_intelligence_sweep = datetime.utcnow() - timedelta(hours=settings.INTELLIGENCE_STALE_AFTER_HOURS)
     last_experiment_sweep = datetime.utcnow() - timedelta(minutes=15)
+    last_source_poll = datetime.utcnow() - timedelta(minutes=5)
 
     while True:
         try:
@@ -80,6 +81,41 @@ async def run_scheduler():
                             experiment_id=exp.id
                         )
                 last_experiment_sweep = now_utc
+
+            # 7. Periodic Inbound Sources polling sweep (every 5 minutes)
+            if (now_utc - last_source_poll).total_seconds() >= (5 * 60):
+                from database import async_session_factory
+                from models.entities import InboundSource, Workflow
+                from services.source_ingestion_service import source_ingestion_service
+                from services.workflow_engine_service import workflow_engine_service
+                logger.info("Executing scheduled inbound sources polling sweep...")
+                async with async_session_factory() as session:
+                    res = await session.execute(
+                        select(InboundSource).where(InboundSource.is_active == True)
+                    )
+                    active_sources = res.scalars().all()
+                    for src in active_sources:
+                        try:
+                            poll_res = await source_ingestion_service.poll_source(session, src.id)
+                            for ingested in poll_res.get("ingested_items", []):
+                                wf_stmt = select(Workflow).where(
+                                    Workflow.source_id == src.id,
+                                    Workflow.active == True
+                                )
+                                workflows = (await session.execute(wf_stmt)).scalars().all()
+                                for wf in workflows:
+                                    try:
+                                        await workflow_engine_service.execute_workflow(
+                                            session,
+                                            wf.id,
+                                            content_id=ingested["content_id"],
+                                            feed_item_id=ingested["feed_item_id"]
+                                        )
+                                    except Exception as wf_err:
+                                        logger.error(f"Error executing workflow '{wf.name}': {wf_err}")
+                        except Exception as poll_err:
+                            logger.error(f"Error polling source '{src.name}': {poll_err}")
+                last_source_poll = now_utc
 
             await asyncio.sleep(settings.SCHEDULER_POLL_INTERVAL_SECONDS)
 

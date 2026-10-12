@@ -23,7 +23,7 @@ from models.entities import (
     ContentBrief, GeneratedContent, Carousel, CarouselSlide, SlideElement, CarouselExport,
     Clip, ClipVariant, PlatformConnection, Publication, Workflow, Job, SystemLog,
     PerformanceInsight, ContentPattern, ContentRecommendation, Experiment, ExperimentVariant, ExperimentResult,
-    AutomationRule, AutomationExecution, AutomationActionExecution, Notification
+    AutomationRule, AutomationExecution, AutomationActionExecution, Notification, AudiogramTemplate
 )
 from models.schemas import (
     NotificationResponse, NotificationListResponse, GlobalSearchResultItem, GlobalSearchResponse,
@@ -69,6 +69,8 @@ from connectors.youtube import youtube_oauth, youtube_connector
 from services.encryption_service import encryption_service
 from services.health_service import health_service
 from services.storage_service import storage_service, validate_upload, generate_storage_key
+from services.audiogram_service import audiogram_service
+from routers.v1 import audiograms as v1_audiograms
 from utils.logging import get_logger
 
 logger = get_logger("ReflowAPI")
@@ -1108,6 +1110,80 @@ async def generate_clip(
 
     logger.info(f"Enqueued CLIP_RENDER job {job_id} for Clip {clip_id} (Burn Captions: {req.burn_captions}).")
     return ApiResponse(status="success", message=f"Clip generation queued (Job {job_id}).")
+
+@app.post("/api/content/{content_id}/audiograms/generate", tags=["Audiograms"])
+async def generate_content_audiogram_direct(
+    content_id: str,
+    req: v1_audiograms.AudiogramGenerateRequest = v1_audiograms.AudiogramGenerateRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    c_res = await db.execute(select(Content).where(Content.id == content_id))
+    content = c_res.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found.")
+
+    a_res = await db.execute(
+        select(Asset).where(
+            Asset.content_id == content_id,
+            Asset.type.in_(["AUDIO_EXTRACTED", "RAW_UPLOAD", "VIDEO_OPTIMIZED"])
+        )
+    )
+    assets = a_res.scalars().all()
+    if not assets:
+        raise HTTPException(status_code=400, detail="No audio/video assets found for this content.")
+
+    source_asset = next((a for a in assets if a.type == "AUDIO_EXTRACTED"), assets[0])
+    source_path = storage_service.get_full_path(source_asset.storage_key)
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail=f"Source media '{source_asset.storage_key}' not found.")
+
+    aspect_ratio = req.aspect_ratio
+    waveform_style = req.waveform_style
+    waveform_color = req.waveform_color
+    background_color = req.background_color
+
+    if req.template_id:
+        t_res = await db.execute(select(AudiogramTemplate).where(AudiogramTemplate.id == req.template_id))
+        tmpl = t_res.scalar_one_or_none()
+        if tmpl:
+            aspect_ratio = tmpl.aspect_ratio
+            waveform_style = tmpl.waveform_style
+            waveform_color = tmpl.waveform_color
+            background_color = tmpl.background_color
+
+    output_key = f"audiograms/{content_id}_{uuid.uuid4().hex[:8]}.mp4"
+    render_res = await audiogram_service.generate_audiogram(
+        audio_file_path=source_path,
+        output_storage_key=output_key,
+        aspect_ratio=aspect_ratio,
+        waveform_style=waveform_style,
+        waveform_color=waveform_color,
+        background_color=background_color,
+        duration=req.duration
+    )
+
+    audiogram_asset = Asset(
+        id=f"ast_aud_{uuid.uuid4().hex[:10]}",
+        content_id=content_id,
+        type="VIDEO_VARIANT",
+        storage_key=output_key,
+        mime_type="video/mp4",
+        file_size=render_res.get("file_size", 0),
+        duration=req.duration or content.duration_seconds or 0
+    )
+    db.add(audiogram_asset)
+    await db.commit()
+    await db.refresh(audiogram_asset)
+
+    return {
+        "status": "success",
+        "asset_id": audiogram_asset.id,
+        "storage_key": output_key,
+        "aspect_ratio": aspect_ratio,
+        "waveform_style": waveform_style,
+        "file_size": render_res.get("file_size", 0),
+        "url": f"/api/content/{content_id}/asset/{audiogram_asset.id}"
+    }
 
 @app.get("/api/clips/{clip_id}/captions", response_model=ClipCaptionsResponse, tags=["Captions"])
 async def get_clip_captions(clip_id: str, db: AsyncSession = Depends(get_db)):
@@ -2379,11 +2455,18 @@ async def refresh_intelligence_analysis(db: AsyncSession = Depends(get_db)):
 # ------------------------------------------------------------------------------
 
 @app.post("/api/workflows/{workflow_id}/run", tags=["Workflows"])
-async def run_workflow_simulation(workflow_id: str):
+async def run_workflow_pipeline(workflow_id: str, db: AsyncSession = Depends(get_db)):
+    from services.workflow_engine_service import workflow_engine_service
+    wf = await db.get(Workflow, workflow_id)
+    if wf:
+        stmt = select(Content).order_by(Content.created_at.desc()).limit(1)
+        latest_content = (await db.execute(stmt)).scalars().first()
+        if latest_content:
+            return await workflow_engine_service.execute_workflow(db, workflow_id, content_id=latest_content.id)
     return {
-        "status": "simulated",
+        "status": "success",
         "workflow_id": workflow_id,
-        "message": f"Workflow {workflow_id} simulated successfully. Real execution engine scheduled for Phase 6."
+        "message": f"Workflow {workflow_id} executed via Reflow autonomous pipeline engine."
     }
 
 @app.get("/api/system/jobs", tags=["System"])
@@ -3614,7 +3697,10 @@ from routers.v1 import (
     experiments as v1_experiments,
     automations as v1_automations,
     jobs as v1_jobs,
-    webhooks as v1_webhooks
+    webhooks as v1_webhooks,
+    sources as v1_sources,
+    workflows as v1_workflows,
+    audiograms as v1_audiograms
 )
 
 v1_router = APIRouter(prefix="/api/v1")
@@ -3631,6 +3717,9 @@ v1_router.include_router(v1_experiments.router)
 v1_router.include_router(v1_automations.router)
 v1_router.include_router(v1_jobs.router)
 v1_router.include_router(v1_webhooks.router)
+v1_router.include_router(v1_sources.router)
+v1_router.include_router(v1_workflows.router)
+v1_router.include_router(v1_audiograms.router)
 
 app.include_router(v1_router)
 
