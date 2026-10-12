@@ -34,7 +34,11 @@ import {
   X,
   Lock,
   Share2,
-  ChevronRight
+  ChevronRight,
+  Radio,
+  Music,
+  Volume2,
+  Palette
 } from 'lucide-react';
 import { YoutubeIcon, InstagramIcon, TiktokIcon, LinkedinIcon, XIcon, FacebookIcon } from '@/components/ui/SocialIcons';
 import { 
@@ -63,9 +67,19 @@ function RepurposeContent() {
   const [connections, setConnections] = useState<PlatformConnectionItem[]>([]);
   const [publications, setPublications] = useState<PublicationItem[]>([]);
   
-  const [mainStudioTab, setMainStudioTab] = useState<'copy' | 'clips'>('copy');
+  const [mainStudioTab, setMainStudioTab] = useState<'copy' | 'clips' | 'audiogram'>('copy');
   const [selectedFormat, setSelectedFormat] = useState('9:16');
   const [activeOutputTab, setActiveOutputTab] = useState('linkedin');
+
+  // Audiogram Studio State
+  const [audiogramAspect, setAudiogramAspect] = useState<'9:16' | '1:1' | '16:9'>('9:16');
+  const [audiogramWaveform, setAudiogramWaveform] = useState<'BARS' | 'LINE'>('BARS');
+  const [audiogramWaveColor, setAudiogramWaveColor] = useState<string>('#6366F1');
+  const [audiogramBgColor, setAudiogramBgColor] = useState<string>('#0F172A');
+  const [audiogramDuration, setAudiogramDuration] = useState<number>(30);
+  const [isGeneratingAudiogram, setIsGeneratingAudiogram] = useState<boolean>(false);
+  const [generatedAudiogramUrl, setGeneratedAudiogramUrl] = useState<string | null>(null);
+  const [audiogramHistory, setAudiogramHistory] = useState<Array<{ id: string; url: string; aspect: string; size: number }>>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isDiscoveringClips, setIsDiscoveringClips] = useState(false);
@@ -224,6 +238,34 @@ function RepurposeContent() {
     } catch (e: any) {
       setActionFeedback(`Clip discovery failed: ${e.message}`);
       setIsDiscoveringClips(false);
+    }
+  };
+
+  const handleGenerateAudiogram = async () => {
+    if (!contentId) return;
+    setIsGeneratingAudiogram(true);
+    setActionFeedback("Synthesizing dynamic audiogram via local FFmpeg waveform engine...");
+    try {
+      const res = await api.generateAudiogram(contentId, {
+        aspect_ratio: audiogramAspect,
+        waveform_style: audiogramWaveform,
+        waveform_color: audiogramWaveColor,
+        background_color: audiogramBgColor,
+        duration: audiogramDuration > 0 ? audiogramDuration : undefined
+      });
+      setGeneratedAudiogramUrl(res.url);
+      setAudiogramHistory(prev => [
+        { id: res.asset_id, url: res.url, aspect: res.aspect_ratio, size: res.file_size },
+        ...prev
+      ]);
+      setActionFeedback(`Audiogram synthesized successfully (${res.aspect_ratio}, ${(res.file_size / (1024 * 1024)).toFixed(2)} MB)!`);
+      if (contentId) {
+        api.getContent(contentId).then(c => setContent(c)).catch(() => {});
+      }
+    } catch (e: any) {
+      setActionFeedback(`Audiogram generation failed: ${e.message || String(e)}`);
+    } finally {
+      setIsGeneratingAudiogram(false);
     }
   };
 
@@ -560,6 +602,15 @@ function RepurposeContent() {
               <Film className="w-3.5 h-3.5" />
               <span>Clips & Captions</span>
             </button>
+            <button
+              onClick={() => setMainStudioTab('audiogram')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                mainStudioTab === 'audiogram' ? 'bg-pink-600 text-white shadow' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Audiogram Studio</span>
+            </button>
           </div>
 
           {/* Publish Action Button */}
@@ -571,7 +622,16 @@ function RepurposeContent() {
             <span>Publish to Social</span>
           </button>
 
-          {mainStudioTab === 'copy' ? (
+          {mainStudioTab === 'audiogram' ? (
+            <button
+              onClick={handleGenerateAudiogram}
+              disabled={isGeneratingAudiogram || !contentId}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white text-xs font-bold shadow-md shadow-pink-600/20 transition-all disabled:opacity-50"
+            >
+              <Music className={`w-3.5 h-3.5 ${isGeneratingAudiogram ? 'animate-spin' : ''}`} />
+              <span>{isGeneratingAudiogram ? "Rendering Waveforms..." : "Synthesize Audiogram"}</span>
+            </button>
+          ) : mainStudioTab === 'copy' ? (
             <button
               onClick={handleGenerateAll}
               disabled={isGenerating || !contentId}
@@ -614,40 +674,144 @@ function RepurposeContent() {
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-indigo-400" />
                 <span className="text-xs font-bold text-white uppercase tracking-wider">
-                  {mainStudioTab === 'clips' ? 'Clip Timing & Live Captions' : 'Original Media Canvas'}
+                  {mainStudioTab === 'audiogram'
+                    ? 'Audiogram Synthesis Canvas'
+                    : mainStudioTab === 'clips'
+                    ? 'Clip Timing & Live Captions'
+                    : 'Original Media Canvas'}
                 </span>
               </div>
               <span className="text-xs text-gray-500 font-mono">
-                {mainStudioTab === 'clips' ? selectedClipRatio : selectedFormat}
+                {mainStudioTab === 'audiogram' ? audiogramAspect : mainStudioTab === 'clips' ? selectedClipRatio : selectedFormat}
               </span>
             </div>
 
-            {/* Video Container with Synchronized Live Caption Overlay */}
-            <div className="relative aspect-video rounded-xl bg-black overflow-hidden border border-[#1F2937] flex items-center justify-center group shadow-inner">
-              {activeMediaUrl ? (
-                <video
-                  ref={videoRef}
-                  src={activeMediaUrl}
-                  controls
-                  onTimeUpdate={handleTimeUpdate}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="text-center p-6 space-y-2">
-                  <Play className="w-8 h-8 text-gray-600 mx-auto" />
-                  <p className="text-xs text-gray-500">No media available to preview</p>
-                </div>
-              )}
-
-              {/* Synchronized Real-time Subtitle Overlay on Video */}
-              {mainStudioTab === 'clips' && activeCaptionCue && (
-                <div className="absolute inset-x-0 bottom-12 flex justify-center px-4 pointer-events-none z-20 animate-fadeIn">
-                  <div className={getCaptionOverlayClass(selectedCaptionStyle)}>
-                    <span>{activeCaptionCue.text}</span>
+            {/* Audiogram Dynamic Preview Canvas OR Video Player */}
+            {mainStudioTab === 'audiogram' ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-[11px] font-semibold text-gray-400">
+                    {generatedAudiogramUrl ? "Synthesized Audiogram Video" : "Live Visual Waveform Canvas"}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {generatedAudiogramUrl && (
+                      <button
+                        onClick={() => setGeneratedAudiogramUrl(null)}
+                        className="text-[10px] text-pink-400 hover:text-pink-300 underline font-mono"
+                      >
+                        Reset Canvas
+                      </button>
+                    )}
+                    <span className="text-[10px] bg-pink-500/20 text-pink-300 font-mono px-2 py-0.5 rounded">
+                      {audiogramAspect} • {audiogramWaveform}
+                    </span>
                   </div>
                 </div>
-              )}
-            </div>
+
+                {generatedAudiogramUrl ? (
+                  <div className={`relative rounded-xl overflow-hidden border border-[#1F2937] shadow-xl bg-black ${
+                    audiogramAspect === '9:16' ? 'aspect-[9/16] max-w-[270px] mx-auto' :
+                    audiogramAspect === '1:1' ? 'aspect-square max-w-[320px] mx-auto' :
+                    'aspect-video w-full'
+                  }`}>
+                    <video src={generatedAudiogramUrl} controls autoPlay loop className="w-full h-full object-contain" />
+                  </div>
+                ) : (
+                  <div
+                    style={{ backgroundColor: audiogramBgColor }}
+                    className={`relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl p-6 flex flex-col justify-between transition-all select-none ${
+                      audiogramAspect === '9:16' ? 'aspect-[9/16] max-w-[270px] mx-auto min-h-[380px]' :
+                      audiogramAspect === '1:1' ? 'aspect-square max-w-[320px] mx-auto min-h-[320px]' :
+                      'aspect-video w-full min-h-[220px]'
+                    }`}
+                  >
+                    {/* Top Header Card */}
+                    <div className="space-y-1 z-10">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-pink-500 animate-ping" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-white/80">Reflow Studio Highlight</span>
+                      </div>
+                      <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug drop-shadow-md">
+                        {content?.title || "Episode Highlight & Core Takeaways"}
+                      </h4>
+                    </div>
+
+                    {/* Center Animated Simulated Waveform */}
+                    <div className="my-auto py-4 flex flex-col items-center justify-center space-y-2 z-10">
+                      {audiogramWaveform === 'BARS' ? (
+                        <div className="flex items-end justify-center gap-1 h-14 w-full px-2">
+                          {[40, 75, 55, 90, 60, 100, 45, 80, 65, 95, 50, 70, 85, 40, 90, 60, 75].map((h, i) => (
+                            <div
+                              key={i}
+                              style={{
+                                height: `${h}%`,
+                                backgroundColor: audiogramWaveColor,
+                                animationDuration: `${0.6 + (i % 5) * 0.15}s`
+                              }}
+                              className="w-1.5 rounded-full animate-pulse transition-all shadow-sm"
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="w-full flex items-center justify-center h-14">
+                          <svg className="w-full h-12 overflow-visible" viewBox="0 0 200 40">
+                            <path
+                              d="M0,20 Q25,5 50,20 T100,20 T150,20 T200,20"
+                              fill="none"
+                              stroke={audiogramWaveColor}
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              className="animate-pulse"
+                            />
+                          </svg>
+                        </div>
+                      )}
+                      <span className="text-[10px] font-mono text-white/70 tracking-wider">
+                        {audiogramDuration}s Audio Window
+                      </span>
+                    </div>
+
+                    {/* Bottom Audio Progress Bar */}
+                    <div className="space-y-1.5 z-10">
+                      <div className="w-full h-1.5 rounded-full bg-white/20 overflow-hidden">
+                        <div style={{ backgroundColor: audiogramWaveColor }} className="h-full w-2/3 rounded-full" />
+                      </div>
+                      <div className="flex justify-between text-[9px] font-mono text-white/60">
+                        <span>00:00</span>
+                        <span>00:{audiogramDuration < 10 ? `0${audiogramDuration}` : audiogramDuration}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Video Container with Synchronized Live Caption Overlay */
+              <div className="relative aspect-video rounded-xl bg-black overflow-hidden border border-[#1F2937] flex items-center justify-center group shadow-inner">
+                {activeMediaUrl ? (
+                  <video
+                    ref={videoRef}
+                    src={activeMediaUrl}
+                    controls
+                    onTimeUpdate={handleTimeUpdate}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="text-center p-6 space-y-2">
+                    <Play className="w-8 h-8 text-gray-600 mx-auto" />
+                    <p className="text-xs text-gray-500">No media available to preview</p>
+                  </div>
+                )}
+
+                {/* Synchronized Real-time Subtitle Overlay on Video */}
+                {mainStudioTab === 'clips' && activeCaptionCue && (
+                  <div className="absolute inset-x-0 bottom-12 flex justify-center px-4 pointer-events-none z-20 animate-fadeIn">
+                    <div className={getCaptionOverlayClass(selectedCaptionStyle)}>
+                      <span>{activeCaptionCue.text}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Mode Specific Controls */}
             {mainStudioTab === 'clips' && selectedClip && (
@@ -892,7 +1056,328 @@ function RepurposeContent() {
 
         {/* Right Column (7 cols): Mode Dependent UI & Publishing History */}
         <div className="lg:col-span-7 space-y-5">
-          {mainStudioTab === 'clips' ? (
+          {mainStudioTab === 'audiogram' ? (
+            /* Audiogram Synthesis & Customization Studio */
+            <div className="space-y-4">
+              <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-5">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-[#1F2937] pb-3">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-pink-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Audiogram Style Studio
+                    </span>
+                  </div>
+                  <span className="text-[10px] bg-pink-500/10 text-pink-300 border border-pink-500/20 px-2 py-0.5 rounded font-mono">
+                    Local FFmpeg Engine
+                  </span>
+                </div>
+
+                {/* Preset Templates Quick-Select */}
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                    1. Choose Preset Template
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {[
+                      {
+                        id: 'vert_reels',
+                        title: 'Vertical Reels',
+                        subtitle: 'TikTok, Reels, Shorts',
+                        aspect: '9:16' as const,
+                        waveform: 'BARS' as const,
+                        waveColor: '#EC4899',
+                        bgColor: '#0F172A',
+                        duration: 30
+                      },
+                      {
+                        id: 'sq_feed',
+                        title: 'Square Feed',
+                        subtitle: 'Instagram, LinkedIn',
+                        aspect: '1:1' as const,
+                        waveform: 'LINE' as const,
+                        waveColor: '#10B981',
+                        bgColor: '#18181B',
+                        duration: 60
+                      },
+                      {
+                        id: 'land_yt',
+                        title: 'YouTube Widescreen',
+                        subtitle: 'Desktop & Community',
+                        aspect: '16:9' as const,
+                        waveform: 'BARS' as const,
+                        waveColor: '#6366F1',
+                        bgColor: '#09090B',
+                        duration: 60
+                      }
+                    ].map((tpl) => {
+                      const isSelected =
+                        audiogramAspect === tpl.aspect &&
+                        audiogramWaveform === tpl.waveform &&
+                        audiogramWaveColor === tpl.waveColor;
+                      return (
+                        <button
+                          key={tpl.id}
+                          onClick={() => {
+                            setAudiogramAspect(tpl.aspect);
+                            setAudiogramWaveform(tpl.waveform);
+                            setAudiogramWaveColor(tpl.waveColor);
+                            setAudiogramBgColor(tpl.bgColor);
+                            setAudiogramDuration(tpl.duration);
+                          }}
+                          className={`p-3 rounded-xl border text-left transition-all space-y-1 ${
+                            isSelected
+                              ? 'bg-pink-600/15 border-pink-500 shadow-md shadow-pink-500/10'
+                              : 'bg-[#161B26] border-[#1F2937] hover:border-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white">{tpl.title}</span>
+                            <span className="text-[9px] font-mono text-pink-400 bg-pink-500/10 px-1.5 py-0.5 rounded">
+                              {tpl.aspect}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-gray-400">{tpl.subtitle}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Aspect Ratio Selector */}
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                    2. Aspect Ratio
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: '9:16' as const, label: '9:16 Vertical (Stories/Reels)' },
+                      { id: '1:1' as const, label: '1:1 Square (Feed)' },
+                      { id: '16:9' as const, label: '16:9 Landscape (YouTube)' }
+                    ].map((ratio) => (
+                      <button
+                        key={ratio.id}
+                        onClick={() => setAudiogramAspect(ratio.id)}
+                        className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all text-center ${
+                          audiogramAspect === ratio.id
+                            ? 'bg-pink-600/20 border-pink-500 text-white shadow'
+                            : 'bg-[#161B26] border-[#1F2937] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {ratio.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Waveform Style & Duration */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                      3. Waveform Style
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setAudiogramWaveform('BARS')}
+                        className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
+                          audiogramWaveform === 'BARS'
+                            ? 'bg-pink-600/20 border-pink-500 text-white'
+                            : 'bg-[#161B26] border-[#1F2937] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Equalizer Bars
+                      </button>
+                      <button
+                        onClick={() => setAudiogramWaveform('LINE')}
+                        className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
+                          audiogramWaveform === 'LINE'
+                            ? 'bg-pink-600/20 border-pink-500 text-white'
+                            : 'bg-[#161B26] border-[#1F2937] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Oscilloscope Wave
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        4. Clip Duration
+                      </span>
+                      <span className="text-xs font-mono text-pink-400 font-bold">
+                        {audiogramDuration}s
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="10"
+                        max="120"
+                        step="5"
+                        value={audiogramDuration}
+                        onChange={(e) => setAudiogramDuration(parseInt(e.target.value))}
+                        className="w-full accent-pink-500 bg-[#161B26] h-1.5 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Color Customization */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                      5. Waveform Accent Color
+                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {[
+                        { hex: '#EC4899', label: 'Rose' },
+                        { hex: '#6366F1', label: 'Indigo' },
+                        { hex: '#10B981', label: 'Emerald' },
+                        { hex: '#F59E0B', label: 'Amber' },
+                        { hex: '#3B82F6', label: 'Blue' },
+                        { hex: '#8B5CF6', label: 'Purple' }
+                      ].map((c) => (
+                        <button
+                          key={c.hex}
+                          onClick={() => setAudiogramWaveColor(c.hex)}
+                          style={{ backgroundColor: c.hex }}
+                          className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                            audiogramWaveColor === c.hex
+                              ? 'border-white scale-110 shadow-md'
+                              : 'border-transparent hover:scale-105'
+                          }`}
+                          title={c.label}
+                        />
+                      ))}
+                      <input
+                        type="text"
+                        value={audiogramWaveColor}
+                        onChange={(e) => setAudiogramWaveColor(e.target.value)}
+                        className="w-20 px-2 py-1 bg-[#161B26] border border-[#1F2937] rounded text-[11px] font-mono text-white text-center ml-auto"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                      6. Canvas Background
+                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {[
+                        { hex: '#0F172A', label: 'Slate Dark' },
+                        { hex: '#09090B', label: 'Midnight' },
+                        { hex: '#18181B', label: 'Zinc' },
+                        { hex: '#1E1B4B', label: 'Deep Indigo' }
+                      ].map((c) => (
+                        <button
+                          key={c.hex}
+                          onClick={() => setAudiogramBgColor(c.hex)}
+                          style={{ backgroundColor: c.hex }}
+                          className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                            audiogramBgColor === c.hex
+                              ? 'border-white scale-110 shadow-md'
+                              : 'border-gray-700 hover:scale-105'
+                          }`}
+                          title={c.label}
+                        />
+                      ))}
+                      <input
+                        type="text"
+                        value={audiogramBgColor}
+                        onChange={(e) => setAudiogramBgColor(e.target.value)}
+                        className="w-20 px-2 py-1 bg-[#161B26] border border-[#1F2937] rounded text-[11px] font-mono text-white text-center ml-auto"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Synthesis Trigger Button */}
+                <div className="pt-2">
+                  <button
+                    onClick={handleGenerateAudiogram}
+                    disabled={isGeneratingAudiogram || !contentId}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-pink-600 via-rose-600 to-pink-500 hover:opacity-95 text-white text-xs font-black shadow-lg shadow-pink-500/20 transition-all disabled:opacity-50"
+                  >
+                    {isGeneratingAudiogram ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Synthesizing Audiogram (Rendering via FFmpeg)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Music className="w-4 h-4" />
+                        <span>Synthesize Audiogram MP4 ({audiogramAspect})</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-[10px] text-gray-500 text-center mt-2 font-mono">
+                    Safe local processing: bounded to 2 CPU threads • No external cloud dependencies
+                  </p>
+                </div>
+              </div>
+
+              {/* Rendered Audiograms History Card */}
+              {audiogramHistory.length > 0 && (
+                <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Rendered Audiograms ({audiogramHistory.length})
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono">Ready for Dispatch</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {audiogramHistory.map((item, idx) => (
+                      <div
+                        key={item.id || idx}
+                        className="p-3 bg-[#161B26] border border-[#1F2937] rounded-xl flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
+                            <Music className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-semibold text-white block">
+                              Audiogram ({item.aspect})
+                            </span>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              {(item.size / (1024 * 1024)).toFixed(2)} MB • MP4 Video
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setGeneratedAudiogramUrl(item.url)}
+                            className="px-2.5 py-1 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-300 text-xs font-medium transition"
+                          >
+                            Preview
+                          </button>
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/30 text-xs font-semibold transition"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Download</span>
+                          </a>
+                          <button
+                            onClick={() => handleOpenPublishModal()}
+                            className="flex items-center gap-1 px-3 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition shadow-sm"
+                          >
+                            <UploadCloud className="w-3 h-3" />
+                            <span>Publish</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : mainStudioTab === 'clips' ? (
             /* Clips & Captions Mode */
             <div className="space-y-4">
               <div className="bg-[#111827] border border-[#1F2937] rounded-2xl p-5 space-y-4">
