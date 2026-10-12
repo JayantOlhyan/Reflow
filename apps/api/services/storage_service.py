@@ -96,6 +96,9 @@ class BaseStorageService(ABC):
     def get_real_path(self, relative_path: str) -> str:
         pass
 
+    def get_full_path(self, relative_path: str) -> str:
+        return self.get_real_path(relative_path)
+
 class LocalStorageService(BaseStorageService):
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = os.path.abspath(base_dir or settings.STORAGE_DIR)
@@ -127,15 +130,17 @@ class LocalStorageService(BaseStorageService):
         safe_path = self._resolve_safe_path(relative_path)
         if os.path.exists(safe_path):
             os.remove(safe_path)
-            logger.info(f"Deleted storage file: {relative_path}")
-            return True
-        return False
+        logger.info(f"Deleted storage file: {relative_path}")
+        return True
 
     async def exists(self, relative_path: str) -> bool:
         safe_path = self._resolve_safe_path(relative_path)
         return os.path.exists(safe_path)
 
     def get_real_path(self, relative_path: str) -> str:
+        return self._resolve_safe_path(relative_path)
+
+    def get_full_path(self, relative_path: str) -> str:
         return self._resolve_safe_path(relative_path)
 
 def get_storage_service() -> BaseStorageService:

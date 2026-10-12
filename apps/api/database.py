@@ -104,6 +104,14 @@ async def init_db():
                 ("experiments", "conclusion", "TEXT"),
                 ("experiments", "created_by", "VARCHAR(64)"),
                 ("experiments", "recommendation_id", "VARCHAR(64)"),
+                ("workflows", "source_id", "VARCHAR(64)"),
+                ("workflows", "mode", "VARCHAR(32) DEFAULT 'AUTOMATIC'"),
+                ("workflows", "filters_json", "TEXT DEFAULT '{}'"),
+                ("workflows", "actions_config_json", "TEXT DEFAULT '{}'"),
+                ("workflows", "destinations_json", "TEXT DEFAULT '[]'"),
+                ("workflows", "drip_config_json", "TEXT DEFAULT '{}'"),
+                ("workflows", "last_run_at", "DATETIME"),
+                ("workflows", "execution_count", "INTEGER DEFAULT 0"),
             ]
             for tbl, col, col_def in migrations:
                 try:

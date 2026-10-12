@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     MAX_BULK_OPERATION_SIZE: int = Field(default=50, description="Maximum bulk operation batch size")
     FFMPEG_PATH: str = Field(default="ffmpeg", description="Path to ffmpeg binary")
     FFPROBE_PATH: str = Field(default="ffprobe", description="Path to ffprobe binary")
+    FFMPEG_THREADS: int = Field(default=2, description="Maximum CPU threads allocated to local FFmpeg tasks")
     
     # AI Providers (Bring Your Own Key)
     GEMINI_API_KEY: Optional[str] = None

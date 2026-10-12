@@ -446,6 +446,50 @@ class PostMetricSnapshot(Base):
         try: return json.loads(self.raw_metrics_json)
         except: return {}
 
+class InboundSource(Base):
+    __tablename__ = "inbound_sources"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    source_type = Column(String(32), nullable=False, index=True) # PODCAST_RSS, YOUTUBE_CHANNEL, TIKTOK, INSTAGRAM, CLOUD_FOLDER, LOCAL_FOLDER
+    config_json = Column(Text, default="{}")
+    last_polled_at = Column(DateTime, nullable=True)
+    last_item_external_id = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    feed_items = relationship("SourceFeedItem", back_populates="source", cascade="all, delete-orphan", lazy="selectin")
+    workflows = relationship("Workflow", back_populates="source")
+
+    @property
+    def config(self):
+        try: return json.loads(self.config_json or "{}")
+        except: return {}
+
+class SourceFeedItem(Base):
+    __tablename__ = "source_feed_items"
+
+    id = Column(String(64), primary_key=True, index=True)
+    source_id = Column(String(64), ForeignKey("inbound_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    external_id = Column(String(255), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    media_url = Column(String(1024), nullable=False)
+    description = Column(Text, default="")
+    published_at = Column(DateTime, nullable=True)
+    metadata_json = Column(Text, default="{}")
+    ingestion_status = Column(String(32), default="PENDING", index=True) # PENDING, INGESTED, IGNORED, FAILED
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="SET NULL"), nullable=True, index=True)
+    detected_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    source = relationship("InboundSource", back_populates="feed_items")
+    content = relationship("Content")
+
+    @property
+    def metadata_dict(self):
+        try: return json.loads(self.metadata_json or "{}")
+        except: return {}
+
 class Workflow(Base):
     __tablename__ = "workflows"
 
@@ -455,6 +499,79 @@ class Workflow(Base):
     description = Column(String(512), default="")
     trigger = Column(String(64), default="Manual Upload")
     nodes_json = Column(Text, default="[]")
+    
+    # Enhanced Workflow Automation Fields
+    source_id = Column(String(64), ForeignKey("inbound_sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    mode = Column(String(32), default="AUTOMATIC") # AUTOMATIC or APPROVAL_REQUIRED
+    filters_json = Column(Text, default="{}") # { include_hashtags: [], exclude_hashtags: [], min_duration: 0, max_duration: 7200 }
+    actions_config_json = Column(Text, default="{}") # { action_type: "AI_CLIPS", aspect_ratios: ["9:16"], caption_style: "BOLD_PUNCH", strip_watermark: True }
+    destinations_json = Column(Text, default="[]") # [{ platform: "youtube", connection_id: "...", custom_caption: "..." }]
+    drip_config_json = Column(Text, default="{}") # { drip_enabled: False, interval_hours: 4, active_hours_start: 9, active_hours_end: 21 }
+    last_run_at = Column(DateTime, nullable=True)
+    execution_count = Column(Integer, default=0)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    source = relationship("InboundSource", back_populates="workflows")
+    executions = relationship("WorkflowExecution", back_populates="workflow", cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def filters(self):
+        try: return json.loads(self.filters_json or "{}")
+        except: return {}
+
+    @property
+    def actions_config(self):
+        try: return json.loads(self.actions_config_json or "{}")
+        except: return {}
+
+    @property
+    def destinations(self):
+        try: return json.loads(self.destinations_json or "[]")
+        except: return []
+
+    @property
+    def drip_config(self):
+        try: return json.loads(self.drip_config_json or "{}")
+        except: return {}
+
+class WorkflowExecution(Base):
+    __tablename__ = "workflow_executions"
+
+    id = Column(String(64), primary_key=True, index=True)
+    workflow_id = Column(String(64), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_feed_item_id = Column(String(64), ForeignKey("source_feed_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    content_id = Column(String(64), ForeignKey("contents.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(32), default="QUEUED", index=True) # QUEUED, RUNNING, SUCCEEDED, FAILED, WAITING_APPROVAL, SKIPPED
+    error = Column(Text, nullable=True)
+    logs_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    workflow = relationship("Workflow", back_populates="executions")
+    source_feed_item = relationship("SourceFeedItem")
+    content = relationship("Content")
+
+    @property
+    def logs(self):
+        try: return json.loads(self.logs_json or "[]")
+        except: return []
+
+class AudiogramTemplate(Base):
+    __tablename__ = "audiogram_templates"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(128), nullable=False)
+    aspect_ratio = Column(String(16), default="9:16") # 9:16, 1:1, 16:9
+    waveform_style = Column(String(32), default="BARS") # BARS, LINE, CIRCULAR, EQUALIZER, WAVE
+    waveform_color = Column(String(32), default="#6366F1")
+    background_color = Column(String(32), default="#0F172A")
+    background_image_path = Column(String(512), nullable=True)
+    title_template = Column(String(255), default="{{title}}")
+    show_progress_bar = Column(Boolean, default=True)
+    progress_bar_color = Column(String(32), default="#10B981")
+    caption_style = Column(String(64), default="BOLD_PUNCH")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
