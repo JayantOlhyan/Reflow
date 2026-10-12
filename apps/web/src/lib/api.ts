@@ -9,7 +9,8 @@ import {
   RescheduleData, CalendarEventItem, CalendarResponse,
   PostMetricSnapshot, PublicationAnalytics, AnalyticsOverview,
   AnalyticsTimeseriesItem, AnalyticsTimeseriesResponse,
-  PlatformAnalyticsItem, ContentAnalyticsItem
+  PlatformAnalyticsItem, ContentAnalyticsItem,
+  InboundSourceItem, SourceFeedItem, WorkflowItem, WorkflowExecutionItem, AudiogramTemplateItem
 } from '@/types';
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -1055,6 +1056,100 @@ class ApiClient {
   async cleanTemporaryStorage(): Promise<{ status: string; message: string; freed_mb: number }> {
     return this.request<{ status: string; message: string; freed_mb: number }>('/api/system/storage/cleanup', {
       method: 'POST'
+    });
+  }
+
+  // --- Inbound Sources & Workflows (Repurpose Engine) ---
+  async getInboundSources(): Promise<import('@/types').InboundSourceItem[]> {
+    return this.request<import('@/types').InboundSourceItem[]>('/api/v1/sources');
+  }
+
+  async createInboundSource(data: { name: string; source_type: string; config: any; is_active?: boolean }): Promise<import('@/types').InboundSourceItem> {
+    return this.request<import('@/types').InboundSourceItem>('/api/v1/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async getInboundSource(id: string): Promise<import('@/types').InboundSourceItem> {
+    return this.request<import('@/types').InboundSourceItem>(`/api/v1/sources/${id}`);
+  }
+
+  async pollInboundSource(id: string): Promise<any> {
+    return this.request<any>(`/api/v1/sources/${id}/poll`, {
+      method: 'POST'
+    });
+  }
+
+  async deleteInboundSource(id: string): Promise<void> {
+    return this.request<void>(`/api/v1/sources/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async getWorkflows(): Promise<import('@/types').WorkflowItem[]> {
+    return this.request<import('@/types').WorkflowItem[]>('/api/v1/workflows');
+  }
+
+  async createWorkflow(data: any): Promise<import('@/types').WorkflowItem> {
+    return this.request<import('@/types').WorkflowItem>('/api/v1/workflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async getWorkflow(id: string): Promise<import('@/types').WorkflowItem> {
+    return this.request<import('@/types').WorkflowItem>(`/api/v1/workflows/${id}`);
+  }
+
+  async updateWorkflow(id: string, data: any): Promise<any> {
+    return this.request<any>(`/api/v1/workflows/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async runWorkflow(id: string, payload?: { content_id?: string; feed_item_id?: string }): Promise<any> {
+    return this.request<any>(`/api/v1/workflows/${id}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {})
+    });
+  }
+
+  async deleteWorkflow(id: string): Promise<void> {
+    return this.request<void>(`/api/v1/workflows/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async getAudiogramTemplates(): Promise<AudiogramTemplateItem[]> {
+    return this.request<AudiogramTemplateItem[]>('/api/v1/audiograms/templates');
+  }
+
+  async generateAudiogram(contentId: string, params: {
+    template_id?: string;
+    aspect_ratio?: string;
+    waveform_style?: string;
+    waveform_color?: string;
+    background_color?: string;
+    duration?: number;
+  }): Promise<{
+    status: string;
+    asset_id: string;
+    storage_key: string;
+    aspect_ratio: string;
+    waveform_style: string;
+    file_size: number;
+    url: string;
+  }> {
+    return this.request(`/api/content/${contentId}/audiograms/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
     });
   }
 }

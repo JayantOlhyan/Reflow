@@ -921,5 +921,95 @@ export interface TraceViewData {
   created_at: string;
 }
 
+// ------------------------------------------------------------------------------
+// Inbound Sources & Repurpose Workflows Engine Types
+// ------------------------------------------------------------------------------
 
+export interface InboundSourceItem {
+  id: string;
+  name: string;
+  source_type: 'PODCAST_RSS' | 'YOUTUBE_CHANNEL' | 'TIKTOK' | 'INSTAGRAM' | 'CLOUD_FOLDER' | 'LOCAL_FOLDER';
+  config: Record<string, any>;
+  last_polled_at?: string | null;
+  last_item_external_id?: string | null;
+  is_active: boolean;
+  created_at?: string;
+  recent_items?: SourceFeedItem[];
+}
 
+export interface SourceFeedItem {
+  id: string;
+  source_id?: string;
+  external_id: string;
+  title: string;
+  media_url: string;
+  ingestion_status: 'PENDING' | 'INGESTED' | 'IGNORED' | 'FAILED';
+  content_id?: string | null;
+  detected_at?: string;
+}
+
+export interface WorkflowItem {
+  id: string;
+  name: string;
+  description?: string;
+  active: boolean;
+  trigger: string;
+  source_id?: string | null;
+  mode: 'AUTOMATIC' | 'APPROVAL_REQUIRED';
+  filters: {
+    include_hashtags?: string[];
+    exclude_hashtags?: string[];
+    min_duration?: number;
+    max_duration?: number;
+  };
+  actions_config: {
+    action_type?: 'AI_CLIPS' | 'AUDIOGRAM' | 'FULL_VIDEO' | 'CAROUSEL';
+    aspect_ratios?: string[];
+    aspect_ratio?: string;
+    waveform_style?: 'BARS' | 'LINE' | 'CIRCULAR' | 'EQUALIZER' | 'WAVE';
+    waveform_color?: string;
+    caption_style?: string;
+    strip_watermark?: boolean;
+  };
+  destinations: Array<{
+    platform: string;
+    connection_id?: string;
+    custom_caption?: string;
+    privacy?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  }>;
+  drip_config: {
+    drip_enabled?: boolean;
+    interval_hours?: number;
+    active_hours_start?: number;
+    active_hours_end?: number;
+  };
+  last_run_at?: string | null;
+  execution_count?: number;
+  created_at?: string;
+  recent_executions?: WorkflowExecutionItem[];
+}
+
+export interface WorkflowExecutionItem {
+  id: string;
+  workflow_id?: string;
+  status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'WAITING_APPROVAL' | 'SKIPPED';
+  content_id?: string | null;
+  error?: string | null;
+  logs?: string[];
+  created_at?: string;
+  completed_at?: string | null;
+}
+
+export interface AudiogramTemplateItem {
+  id: string;
+  name: string;
+  aspect_ratio: '9:16' | '1:1' | '16:9' | '4:5';
+  waveform_style: 'BARS' | 'LINE' | 'CIRCULAR' | 'EQUALIZER' | 'WAVE';
+  waveform_color: string;
+  background_color: string;
+  background_image_path?: string | null;
+  title_template: string;
+  show_progress_bar: boolean;
+  progress_bar_color: string;
+  caption_style: string;
+}
