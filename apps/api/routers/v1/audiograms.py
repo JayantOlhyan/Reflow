@@ -214,3 +214,19 @@ async def generate_content_audiogram(
         "file_size": render_res.get("file_size", 0),
         "url": f"/api/content/{content_id}/asset/{audiogram_asset.id}"
     }
+
+@router.delete("/audiograms/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_audiogram_template(
+    template_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Deletes an audiogram template."""
+    tmpl = await db.get(AudiogramTemplate, template_id)
+    if not tmpl:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Template '{template_id}' not found."}}
+        )
+    await db.delete(tmpl)
+    await db.commit()
+    return None

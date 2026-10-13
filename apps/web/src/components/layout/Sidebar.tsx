@@ -21,7 +21,9 @@ import {
   Puzzle,
   Globe,
   Terminal,
-  FlaskConical
+  FlaskConical,
+  LayoutTemplate,
+  Sliders
 } from 'lucide-react';
 
 interface NavSection {
@@ -50,13 +52,15 @@ export const Sidebar: React.FC = () => {
       items: [
         { name: 'Repurpose Studio', href: '/repurpose', icon: Sparkles },
         { name: 'Carousel Studio', href: '/carousel', icon: Layers },
+        { name: 'Templates Studio', href: '/templates', icon: LayoutTemplate },
       ],
     },
     {
-      title: 'PLAN',
+      title: 'PLAN & REPURPOSE',
       items: [
+        { name: 'Workflows', href: '/workflows', icon: GitBranch },
         { name: 'Calendar', href: '/calendar', icon: Calendar },
-        { name: 'Automations', href: '/automations', icon: GitBranch },
+        { name: 'Automations', href: '/automations', icon: Sliders },
         { name: 'Experiments', href: '/experiments', icon: FlaskConical },
       ],
     },

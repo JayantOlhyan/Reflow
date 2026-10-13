@@ -34,7 +34,8 @@ class WorkflowEngineService:
         db: AsyncSession,
         workflow_id: str,
         content_id: Optional[str] = None,
-        feed_item_id: Optional[str] = None
+        feed_item_id: Optional[str] = None,
+        custom_caption: Optional[str] = None
     ) -> Dict[str, Any]:
         workflow = await db.get(Workflow, workflow_id)
         if not workflow:
@@ -49,8 +50,22 @@ class WorkflowEngineService:
             content = await db.get(Content, content_id)
         elif feed_item_id:
             feed_item = await db.get(SourceFeedItem, feed_item_id)
-            if feed_item and feed_item.content_id:
-                content = await db.get(Content, feed_item.content_id)
+            if feed_item:
+                if feed_item.content_id:
+                    content = await db.get(Content, feed_item.content_id)
+                if not content:
+                    # Auto-provision content from feed item
+                    content = Content(
+                        id=f"cnt_{uuid.uuid4().hex[:12]}",
+                        title=feed_item.title or "Untitled Feed Episode",
+                        content_type="AUDIO",
+                        status="READY",
+                        text_content=feed_item.title or ""
+                    )
+                    db.add(content)
+                    feed_item.content_id = content.id
+                    feed_item.ingestion_status = "INGESTED"
+                    await db.flush()
 
         if not content:
             raise ValueError("No Content found to execute workflow against.")
@@ -121,8 +136,11 @@ class WorkflowEngineService:
                     connection_id = dest.get("connection_id")
                     caption_tpl = dest.get("custom_caption", "{{title}}\n\n{{description}}")
 
-                    formatted_caption = caption_tpl.replace("{{title}}", content.title or "")
-                    formatted_caption = formatted_caption.replace("{{description}}", (content.text_content or "")[:500])
+                    if custom_caption:
+                        formatted_caption = custom_caption
+                    else:
+                        formatted_caption = caption_tpl.replace("{{title}}", content.title or "")
+                        formatted_caption = formatted_caption.replace("{{description}}", (content.text_content or "")[:500])
 
                     pub_status = "SCHEDULED" if (workflow.mode == "AUTOMATIC" and drip_enabled) else ("QUEUED" if workflow.mode == "AUTOMATIC" else "DRAFT")
                     sched_at = scheduled_times[idx] if (drip_enabled and idx < len(scheduled_times)) else None

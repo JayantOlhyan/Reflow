@@ -1112,12 +1112,16 @@ class ApiClient {
     });
   }
 
-  async runWorkflow(id: string, payload?: { content_id?: string; feed_item_id?: string }): Promise<any> {
+  async runWorkflow(id: string, payload?: { content_id?: string; feed_item_id?: string; custom_caption?: string }): Promise<any> {
     return this.request<any>(`/api/v1/workflows/${id}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || {})
     });
+  }
+
+  async getWorkflowContent(id: string): Promise<any> {
+    return this.request<any>(`/api/v1/workflows/${id}/content`);
   }
 
   async deleteWorkflow(id: string): Promise<void> {
@@ -1128,6 +1132,20 @@ class ApiClient {
 
   async getAudiogramTemplates(): Promise<AudiogramTemplateItem[]> {
     return this.request<AudiogramTemplateItem[]>('/api/v1/audiograms/templates');
+  }
+
+  async createAudiogramTemplate(payload: Partial<AudiogramTemplateItem>): Promise<any> {
+    return this.request<any>('/api/v1/audiograms/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteAudiogramTemplate(id: string): Promise<void> {
+    return this.request<void>(`/api/v1/audiograms/templates/${id}`, {
+      method: 'DELETE'
+    });
   }
 
   async generateAudiogram(contentId: string, params: {

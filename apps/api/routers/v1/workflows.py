@@ -8,7 +8,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.entities import Workflow, WorkflowExecution, InboundSource
+from models.entities import Workflow, WorkflowExecution, InboundSource, SourceFeedItem, Content, Publication
 from services.workflow_engine_service import workflow_engine_service
 from utils.logging import get_logger
 
@@ -42,6 +42,7 @@ class WorkflowUpdate(BaseModel):
 class WorkflowRunPayload(BaseModel):
     content_id: Optional[str] = None
     feed_item_id: Optional[str] = None
+    custom_caption: Optional[str] = None
 
 @router.get("", response_model=List[Dict[str, Any]])
 async def list_workflows(db: AsyncSession = Depends(get_db)):
@@ -137,6 +138,70 @@ async def get_workflow(workflow_id: str, db: AsyncSession = Depends(get_db)):
         ]
     }
 
+@router.get("/{workflow_id}/content")
+async def get_workflow_content(workflow_id: str, db: AsyncSession = Depends(get_db)):
+    """Get all content items / episodes detected from this workflow's source and their status."""
+    workflow = await db.get(Workflow, workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found.")
+
+    if not workflow.source_id:
+        return {"workflow_id": workflow_id, "items": []}
+
+    stmt = select(SourceFeedItem).where(
+        SourceFeedItem.source_id == workflow.source_id
+    ).order_by(SourceFeedItem.detected_at.desc()).limit(50)
+    feed_items = (await db.execute(stmt)).scalars().all()
+
+    content_ids = [it.content_id for it in feed_items if it.content_id]
+    contents_map = {}
+    publications_map = {}
+
+    if content_ids:
+        c_stmt = select(Content).where(Content.id.in_(content_ids))
+        contents = (await db.execute(c_stmt)).scalars().all()
+        contents_map = {c.id: c for c in contents}
+
+        p_stmt = select(Publication).where(Publication.content_id.in_(content_ids))
+        pubs = (await db.execute(p_stmt)).scalars().all()
+        for p in pubs:
+            publications_map.setdefault(p.content_id, []).append(p)
+
+    results = []
+    for it in feed_items:
+        c = contents_map.get(it.content_id)
+        pubs = publications_map.get(it.content_id, [])
+        results.append({
+            "id": it.id,
+            "external_id": it.external_id,
+            "title": it.title,
+            "media_url": it.media_url,
+            "ingestion_status": it.ingestion_status,
+            "content_id": it.content_id,
+            "duration": c.duration_seconds if c else None,
+            "thumbnail": c.thumbnail_path if c else None,
+            "detected_at": it.detected_at.isoformat() if it.detected_at else None,
+            "publications": [
+                {
+                    "id": p.id,
+                    "platform": p.platform,
+                    "status": p.status,
+                    "scheduled_at": p.scheduled_at.isoformat() if p.scheduled_at else None,
+                    "published_at": p.published_at.isoformat() if p.published_at else None,
+                    "external_url": p.external_url
+                }
+                for p in pubs
+            ]
+        })
+
+    return {
+        "workflow_id": workflow_id,
+        "workflow_name": workflow.name,
+        "source_id": workflow.source_id,
+        "mode": workflow.mode,
+        "items": results
+    }
+
 @router.put("/{workflow_id}")
 async def update_workflow(workflow_id: str, payload: WorkflowUpdate, db: AsyncSession = Depends(get_db)):
     """Update workflow configuration."""
@@ -173,7 +238,8 @@ async def run_workflow(
             db=db,
             workflow_id=workflow_id,
             content_id=content_id,
-            feed_item_id=feed_item_id
+            feed_item_id=feed_item_id,
+            custom_caption=payload.custom_caption if payload else None
         )
         return result
     except Exception as e:
